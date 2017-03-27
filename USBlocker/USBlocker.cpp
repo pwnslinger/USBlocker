@@ -248,114 +248,63 @@ NTSTATUS USBlockerAddDevice(IN PDRIVER_OBJECT  DriverObject, IN PDEVICE_OBJECT  
 	KdPrint(("%S: USBlocker AddDevice routine.\n",DRV_NAME));
 	DbgPrint("%S: USBlocker AddDevice routine.\n",DRV_NAME);
 
-	//PDEVICE_OBJECT fido = NULL;
-	PDEVICE_OBJECT fido;
+	PDEVICE_OBJECT fido = NULL;
 	PUSBlocker_DEVICE_EXTENSION pdx = NULL;
-	UNICODE_STRING Device_name;
-	UNICODE_STRING Glob_name;
-	NTSTATUS status;
+	NTSTATUS status = STATUS_UNSUCCESSFUL;
+	PDEVICE_OBJECT highestDO = IoGetAttachedDeviceReference(PhysicalDeviceObject);
 
-	RtlInitUnicodeString(&Device_name,DEV_NAME);
-	
 	status = IoCreateDevice(DriverObject,
 						    sizeof(USBlocker_DEVICE_EXTENSION),
 							NULL, //no name provided
-							FILE_DEVICE_UNKNOWN,
-							0, //remove FILE_DEVICE_SECURE_OPEN change to 0
-							FALSE,
+							highestDO->DeviceType,
+							(highestDO->Characteristics & FILE_REMOVABLE_MEDIA), //remove FILE_DEVICE_SECURE_OPEN change to 0
+							(highestDO->Flags & DO_EXCLUSIVE) != 0,
 							&fido); // change device type to FILE_DEVICE_UNKNOWN
-	//DBGUSBlock: Cannot Create Device Object. Status C0000035 ~ STATUS_OBJECT_NAME_COLLISION
 
+	ObDereferenceObject(highestDO);
 	if (!NT_SUCCESS(status))
 	{
+		//DBGUSBlock: Cannot Create Device Object. Status C0000035 ~ STATUS_OBJECT_NAME_COLLISION
 		KdPrint(("%S: Cannot Create Device Object. Status %X\n",DRV_NAME,status));
 		DbgPrint("%S: Cannot Create Device Object. Status %X\n",DRV_NAME,status);
 		return status;
 	}
 
-	KdPrint(("%S: Device Object Created.\n",DRV_NAME,status));
-	DbgPrint("%S: Device Object Created.\n",DRV_NAME,status);
-
-	/* Create a symlink for user applications. */
-	RtlInitUnicodeString(&Glob_name,GLOB_NAME);
-	/*	
-	status = IoCreateSymbolicLink( &Glob_name, &Device_name );
-	if( !NT_SUCCESS( status ) ) {
-		KdPrint(("%S: Failed to create symbolic link! - %X\n", DRV_NAME,status));
-		DbgPrint("%S: Failed to create symbolic link! - %X\n", DRV_NAME,status);
-		IoDeleteDevice( fido );
-		return status;
-	}
-
-	KdPrint(("%S: SymbolicLink created. - %X\n", DRV_NAME,status) );
-	DbgPrint("%S: SymbolicLink created. - %X\n", DRV_NAME,status);
-*/
 	pdx = (PUSBlocker_DEVICE_EXTENSION)fido->DeviceExtension;
 	RtlZeroMemory(pdx,sizeof(PUSBlocker_DEVICE_EXTENSION));
-	//pdx->LinkName = Device_name; // save symbolic link of device so we can remove it later
-	
-	//register drive interface and set state in IRP_MN_START_DEVICE routine
-	status = IoRegisterDeviceInterface(PhysicalDeviceObject,&GUID_USBlockerInterface,NULL,&pdx->DeviceInterface);
-	
-	if( !NT_SUCCESS( status ) ) {
-		KdPrint(("%S: Failed to create symbolic link! - %X\n", DRV_NAME,status));
-		DbgPrint("%S: Failed to create symbolic link! - %X\n", DRV_NAME,status);
-		IoDeleteDevice( fido );
-		return status;
-	}
 		
 	DbgPrint("%S: Symbolic Link Name is %T.\n",DRV_NAME,&pdx->DeviceInterface);
 
 	pdx->DeviceObject = fido;
 	pdx->PhysicalDeviceObject = PhysicalDeviceObject;
-	__try
+
+	IoInitializeRemoveLock(&pdx->RemoveLock,0,0,0);
+	status = IoAttachDeviceToDeviceStackSafe(fido, PhysicalDeviceObject, &pdx->lowerDeviceObject);
+
+	if(!NT_SUCCESS(status))
 	{
-		IoInitializeRemoveLock(&pdx->RemoveLock,0,0,0);
-		PDEVICE_OBJECT fdo = IoAttachDeviceToDeviceStack(fido, PhysicalDeviceObject);
-
-		if(fdo == NULL)
-		{
-			KdPrint(("%S: Cannot attach device to device stack.\n",DRV_NAME) );
-			DbgPrint("%S: Cannot attach device to device stack.\n",DRV_NAME);
-			IoDeleteDevice(fido);
-			return STATUS_DEVICE_NOT_CONNECTED;
-
-		}
-
-		pdx->lowerDeviceObject = fdo;
-
-		status = IoRegisterDeviceInterface(PhysicalDeviceObject, &GUID_USBlockerInterface, NULL, &pdx->DeviceInterface);
-		ASSERT(NT_SUCCESS(status));
-		
+		KdPrint(("%S: Cannot attach device to device stack.\n",DRV_NAME) );
 		DbgPrint("%S: Cannot attach device to device stack.\n",DRV_NAME);
-
-		//copy flags from lower device drivers to fido, however no need to copy characteristics or AlignmentRequirement
-		//since those will be copied by IoAttachDeviceToDeviceStack
-		//Power Manager checks top of the device stack gradually and send IRP_MN_SET_POWER and IRP_MN_QUERY_POWER
-		//in PASSIVE_MODE depending on IRQL level to the device driver
-
-		fido->Flags |= fdo->Flags & (DO_DIRECT_IO | DO_POWER_PAGABLE | DO_POWER_INRUSH | DO_BUFFERED_IO);
-		fido->DeviceType = fdo->DeviceType;
-		fido->Characteristics = fdo->Characteristics |= FILE_DEVICE_SECURE_OPEN;
-		fido->AlignmentRequirement = fdo->AlignmentRequirement;
-
-		//initializing has been done
-		fido->Flags &= ~DO_DEVICE_INITIALIZING;
+		IoDeleteDevice(fido);
+		return STATUS_DEVICE_NOT_CONNECTED;
+	}
 		
+	status = IoRegisterDeviceInterface(PhysicalDeviceObject, &GUID_USBlockerInterface, NULL, &pdx->DeviceInterface);
+	if (!NT_SUCCESS(status)) {
+		// Failed to register the device interface
+		IoDetachDevice(pdx->lowerDeviceObject);
+		IoDeleteDevice(fido);
+		
+		return status;
 	}
 
-	__finally
-	{
-		if(!NT_SUCCESS(status))
-		{
-			IoDeleteDevice(fido);
-			
-		}
-	}
+	highestDO = pdx->lowerDeviceObject;
+	fido->Flags |= highestDO->Flags & (DO_DIRECT_IO | DO_POWER_PAGABLE | DO_POWER_INRUSH | DO_BUFFERED_IO);
+	fido->DeviceType = highestDO->DeviceType;
+	fido->Characteristics = highestDO->Characteristics |= FILE_DEVICE_SECURE_OPEN;
 
-	//free symlink buffer unicode string
-	//ExFreePool(Device_name.Buffer);
-	//ExFreePool(Glob_name.Buffer);
+	fido->Flags &= ~DO_DEVICE_INITIALIZING;
+
 	return STATUS_SUCCESS;
 }
 
