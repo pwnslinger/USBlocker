@@ -1,0 +1,45 @@
+[Version]
+Signature="$Windows NT$"
+Class=USB
+ClassGUID={36fc9e60-c465-11cf-8056-444553540000}
+Provider=%OrganizationName%
+DriverVer=03/04/2017,1.00.2000.3
+CatalogFile=
+
+[DefaultInstall]
+CopyFiles = @USBlocker.sys
+Addreg    = USBlocker.AddReg
+
+[DefaultInstall.NT]
+CopyFiles = @USBlocker.sys
+Addreg    = USBlocker.AddReg
+
+[DestinationDirs]
+DefaultDestDir=12 ; DIRID_DRIVERS
+
+[USBlocker.AddReg]
+HKLM, System\CurrentControlSet\Control\Class\{36fc9e60-c465-11cf-8056-444553540000}, UpperFilters, 0x00010008, USBlocker
+
+[DefaultInstall.Services]
+AddService = USBlocker, , USBlocker.Service.Install
+
+[DefaultInstall.NT.Services]
+AddService = USBlocker, , USBlocker.Service.Install
+
+[USBlocker.Service.Install]
+DisplayName    = %service_desc%
+ServiceType    = 1 ;SERVICE_KERNEL_DRIVER
+StartType      = 1 ; SERVICE_SYSTEM_START
+ErrorControl   = 1 ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %12%\USBlocker.sys
+
+[SourceDisksFiles]
+USBlocker.sys = 1
+
+[SourceDisksNames]
+1 = %disk_description%,,,
+
+[Strings] 
+OrganizationName = "Payam Pardaz Company"
+service_desc = "USBlocker"
+disk_description = "Block Mass-Storage Device"
