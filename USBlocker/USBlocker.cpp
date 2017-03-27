@@ -53,8 +53,6 @@ UNICODE_STRING srvkey;
 extern "C" NTSTATUS DriverEntry(IN PDRIVER_OBJECT DriverObject, IN PUNICODE_STRING  RegistryPath);
 #endif
 
-//const string DEV_NAME = "DBGUSBlock";
-//const string DRV_TAG = "USBLock";
 
 NTSTATUS DriverEntry(IN PDRIVER_OBJECT DriverObject, IN PUNICODE_STRING  RegistryPath)
 {
@@ -120,7 +118,6 @@ NTSTATUS DriverEntry(IN PDRIVER_OBJECT DriverObject, IN PUNICODE_STRING  Registr
 //set information and status of IoStatus member of IRP request in order to complete it
 NTSTATUS CompleteRequest(IN PIRP Irp, IN NTSTATUS status, IN ULONG_PTR info)
 {
-	PAGED_CODE();
 	Irp->IoStatus.Status = status;
 	Irp->IoStatus.Information = info;
 	IoCompleteRequest(Irp,IO_NO_INCREMENT);
@@ -128,18 +125,6 @@ NTSTATUS CompleteRequest(IN PIRP Irp, IN NTSTATUS status, IN ULONG_PTR info)
 	return status;
 }
 
-bool isAboveVista()
-{
-	bool result=false;
-	OSVERSIONINFOW osvi;
-	RtlZeroMemory(&osvi,sizeof(OSVERSIONINFOW));
-	osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFOW);
-	RtlGetVersion(&osvi);
-
-	if(((osvi.dwMajorVersion > 6) || (osvi.dwMajorVersion ==6)) && (osvi.dwMinorVersion >= 0)) result=true;
-
-	return result;
-}
 
 VOID USBlockerUnload(IN PDRIVER_OBJECT DriverObject)
 {
@@ -280,7 +265,6 @@ NTSTATUS USBlockerAddDevice(IN PDRIVER_OBJECT  DriverObject, IN PDEVICE_OBJECT  
 
 	IoInitializeRemoveLock(&pdx->RemoveLock,0,0,0);
 	status = IoAttachDeviceToDeviceStackSafe(fido, PhysicalDeviceObject, &pdx->lowerDeviceObject);
-
 	if(!NT_SUCCESS(status))
 	{
 		KdPrint(("%S: Cannot attach device to device stack.\n",DRV_NAME) );
@@ -531,21 +515,20 @@ NTSTATUS USBCall(IN PDEVICE_OBJECT DeviceObject, IN PURB urb,IN PIRP Irp)
 
 NTSTATUS IOControl(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 {
-
-	PAGED_CODE();
 	NTSTATUS status;
 	PIO_STACK_LOCATION stack;
 	wchar_t *req=NULL;
 	PURB urb;
 	KEVENT startDevice;
 	PUSBlocker_DEVICE_EXTENSION dex = (PUSBlocker_DEVICE_EXTENSION)DeviceObject->DeviceExtension;
-	stack = IoGetCurrentIrpStackLocation(Irp);
-	KdPrint(("%S: Entering IRP_MJ_INTERNAL_DEVICE_CONTROL dispatch routine.\n",DRV_NAME));
-	DbgPrint("%S: Entering IRP_MJ_INTERNAL_DEVICE_CONTROL dispatch routine.\n",DRV_NAME);
 
-	//retrieving io control code of the current IRP sent to top most driver in kmode
+	stack = IoGetCurrentIrpStackLocation(Irp);
 	ULONG ioControlCode = stack->Parameters.DeviceIoControl.IoControlCode;
 	
+	status = IoAcquireRemoveLock(&dex->RemoveLock, Irp);
+	if (!NT_SUCCESS(status))
+		return CompleteRequest(Irp, status, 0);
+
 	switch(ioControlCode)
 	{
 	case IOCTL_INTERNAL_USB_SUBMIT_URB: req = L"IOCTL_INTERNAL_USB_SUBMIT_URB"; break;
@@ -560,24 +543,8 @@ NTSTATUS IOControl(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 	default: req=NULL; break; //default switch case 
 	}
 
-	KdPrint(("%S: IRP_MJ_INTERNAL_DEVICE_CONTROL - USB IOCTL = %s\n",DRV_NAME,req));
-	DbgPrint("%S: IRP_MJ_INTERNAL_DEVICE_CONTROL - USB IOCTL = %s\n",DRV_NAME,req);
-	/*
-	if(req==IOCTL_INTERNAL_USB_GET_DEVICE_CONFIG_INFO)
-	{
-		status = IoAcquireRemoveLock(dex->RemoveLock,Irp);
-		if(!NT_SUCCESS(status)) CompleteRequest(Irp,status,0);
-		HUB_DEVICE_CONFIG_INFO confInfo;
-		confInfo = (HUB_DEVICE_CONFIG_INFO) stack->Parameters.Others.Argument1;
-
-		
-	}
-*/
 	if (req==L"IOCTL_INTERNAL_USB_SUBMIT_URB")
 	{
-		status = IoAcquireRemoveLock(&dex->RemoveLock,Irp);
-		if(!NT_SUCCESS(status)) CompleteRequest(Irp,status,0);
-		
 		urb = (PURB)stack->Parameters.Others.Argument1;
 		if(( urb->UrbControlDescriptorRequest.DescriptorType==USB_STRING_DESCRIPTOR_TYPE || urb->UrbControlDescriptorRequest.DescriptorType==USB_CONFIGURATION_DESCRIPTOR_TYPE || urb->UrbControlDescriptorRequest.DescriptorType==USB_DEVICE_DESCRIPTOR_TYPE) && (urb->UrbHeader.Function==URB_FUNCTION_GET_DESCRIPTOR_FROM_DEVICE || urb->UrbHeader.Function==URB_FUNCTION_GET_DESCRIPTOR_FROM_ENDPOINT))
 		{
@@ -615,20 +582,15 @@ NTSTATUS IOControl(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 			}
 
 			
-		}
-		
-		IoReleaseRemoveLock(&dex->RemoveLock,Irp);
+		}		
 	}//end if IOCTL_INTERNAL_USB_SUBMIT_URB
 	else
 	{
-		IoCopyCurrentIrpStackLocationToNext(Irp);
+		IoSkipCurrentIrpStackLocation(Irp);
 		status = IoCallDriver(dex->lowerDeviceObject,Irp);
-		if (Irp->PendingReturned) IoMarkIrpPending(Irp);
-
-		IoReleaseRemoveLock(&dex->RemoveLock,Irp);
-		//if(status == STATUS_PENDING) IoMarkIrpPending(Irp);
 	}
 
+	IoReleaseRemoveLock(&dex->RemoveLock, Irp);
 	return status;
 
 }
@@ -639,8 +601,16 @@ NTSTATUS inspectReturnedURB(IN PDEVICE_OBJECT fdio, IN PIRP Irp, IN KEVENT Conte
 	ULONG ioControlCode = stack->Parameters.DeviceIoControl.IoControlCode;
 	PURB urb;
 	NTSTATUS status;
-	if(Irp->PendingReturned) IoMarkIrpPending(Irp);
+
+	if(Irp->PendingReturned) 
+		IoMarkIrpPending(Irp);
+	
 	status = Irp->IoStatus.Status; //set by lower-level driver
+	if (!NT_SUCCESS(status))
+		// Well, the URB actually failed without we helping it, so
+		// there should be no point in examining it since it might not be
+		// properly initialized
+		return STATUS_CONTINUE_COMPLETION;
 
 	if(ioControlCode==IOCTL_INTERNAL_USB_SUBMIT_URB)
 	{
@@ -862,38 +832,41 @@ NTSTATUS inspectReturnedURB(IN PDEVICE_OBJECT fdio, IN PIRP Irp, IN KEVENT Conte
 				
 				ULONG size = (strDesc->bLength-2)/2;
 				PWSTR str = (PWSTR)ExAllocatePool(PagedPool,strDesc->bLength);
-				if (!str) return STATUS_INSUFFICIENT_RESOURCES;
-				memcpy(str,(PWSTR)strDesc->bString,size*2 + sizeof(WCHAR));
-				//RtlCopyUnicodeString(str,strDesc->Buffer);
-				str[size]=0;
+				if (str) {
+					memcpy(str, (PWSTR)strDesc->bString, size * 2 + sizeof(WCHAR));
+					//RtlCopyUnicodeString(str,strDesc->Buffer);
+					str[size] = 0;
 
-				//stringDesc->Length = (USHORT)size*2;
-				//stringDesc->MaximumLength = (USHORT)((size*2) + sizeof(WCHAR));
-				//stringDesc->Buffer = str;
+					//stringDesc->Length = (USHORT)size*2;
+					//stringDesc->MaximumLength = (USHORT)((size*2) + sizeof(WCHAR));
+					//stringDesc->Buffer = str;
 
-				//report all information from device descriptor
-				KdPrint(("%S: USB_STRING_DESCRIPTOR...\n",DRV_NAME));
-				KdPrint(("%S: Length of the string descriptor structure= %u (bytes)\n",DRV_NAME,size));
-				KdPrint(("%S: String descriptor = %s\n",DRV_NAME,&str));
-
+					//report all information from device descriptor
+					KdPrint(("%S: USB_STRING_DESCRIPTOR...\n", DRV_NAME));
+					KdPrint(("%S: Length of the string descriptor structure= %u (bytes)\n", DRV_NAME, size));
+					KdPrint(("%S: String descriptor = %s\n", DRV_NAME, &str));
+				} else status = STATUS_INSUFFICIENT_RESOURCES;
+				
 				break;
 
 			}//end Mdl buffer
 		}
 	}
-	return status;
+
+	if (!NT_SUCCESS(status))
+		Irp->IoStatus.Status = status;
+
+	return STATUS_CONTINUE_COMPLETION;
 }
 
 
 NTSTATUS USBlockerPnP(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 {
-	PAGED_CODE();
-
+	NTSTATUS status = STATUS_UNSUCCESSFUL;
 	PIO_STACK_LOCATION irpSp = IoGetCurrentIrpStackLocation(Irp);
 	PUSBlocker_DEVICE_EXTENSION pdx = (PUSBlocker_DEVICE_EXTENSION)DeviceObject->DeviceExtension;
-	NTSTATUS status;
+	PAGED_CODE();
 
-	ASSERT(pdx);
 	status = IoAcquireRemoveLock(&pdx->RemoveLock,Irp);
 	if(!NT_SUCCESS(status)) 
 		return CompleteRequest(Irp,status,0);
@@ -907,11 +880,6 @@ NTSTATUS USBlockerPnP(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 
 		Irp->IoStatus.Status = status;
 		IoCompleteRequest(Irp,IO_NO_INCREMENT); //should be called from dispatcher routine not from completion routine
-		IoReleaseRemoveLock(&pdx->RemoveLock,Irp);
-	
-	case IRP_MN_QUERY_REMOVE_DEVICE:
-		IoSkipCurrentIrpStackLocation(Irp);
-		status = IoCallDriver(pdx->lowerDeviceObject, Irp);
 		IoReleaseRemoveLock(&pdx->RemoveLock,Irp);
 
 	case IRP_MN_REMOVE_DEVICE:
