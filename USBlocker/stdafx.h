@@ -31,7 +31,7 @@ extern "C"
 #include <ntddvol.h>
 #include <usbioctl.h>
 #include <usbdlib.h>
-
+#include "debug-macros.h"
 
 #ifdef __cplusplus
 }

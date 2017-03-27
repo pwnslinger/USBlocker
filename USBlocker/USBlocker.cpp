@@ -33,7 +33,6 @@ NTSTATUS USBlockerCreateClose(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
 NTSTATUS USBlockerDispatchAny(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
 NTSTATUS USBlockerAddDevice(IN PDRIVER_OBJECT  DriverObject, IN PDEVICE_OBJECT  PhysicalDeviceObject);
 NTSTATUS USBlockerPnP(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
-NTSTATUS startDeviceCompletionRoutine(IN PDEVICE_OBJECT fdio, IN PIRP Irp, IN PKEVENT Context);
 NTSTATUS IOControl(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
 //NTSTATUS wmiControl(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
 //NTSTATUS dispatchIOCTL(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
@@ -41,7 +40,7 @@ NTSTATUS dispatchPower(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
 NTSTATUS getDeviceDescriptor(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
 NTSTATUS USBCall(IN PDEVICE_OBJECT DeviceObject, IN PURB urb, IN PIRP Irp);
 NTSTATUS inspectReturnedURB(IN PDEVICE_OBJECT fdio, IN PIRP Irp, IN KEVENT Context);
-NTSTATUS CompleteRequest(IN PIRP Irp, IN NTSTATUS status, IN ULONG_PTR info);
+VOID CompleteRequest(IN PIRP Irp, IN NTSTATUS status, IN ULONG_PTR info);
 
 // {5e0e7886-b727-4a14-b692-8ffc70f7b7ea}
 static const GUID GUID_USBlockerInterface = {0x5E0E7886, 0xb727, 0x4a14, {0xb6, 0x92, 0x8f, 0xfc, 0x70, 0xf7, 0xb7, 0xea } };
@@ -56,46 +55,27 @@ extern "C" NTSTATUS DriverEntry(IN PDRIVER_OBJECT DriverObject, IN PUNICODE_STRI
 
 NTSTATUS DriverEntry(IN PDRIVER_OBJECT DriverObject, IN PUNICODE_STRING  RegistryPath)
 {
+	unsigned int i;
+	NTSTATUS status = STATUS_UNSUCCESSFUL;
+	DEBUG_ENTER_FUNCTION("DriverObject=0x%p; RegistryPath=\"%wZ\"", DriverObject, RegistryPath);
+	PAGED_CODE();
+
 #if DBG
 	DbgBreakPoint();
 #endif
-	
-	PAGED_CODE();
-		
-	unsigned int i;
-	KdPrint(("%S: Starting routine of USBlocker. DriverEntry located at %8.81X\n",DRV_NAME,DriverObject));
-	DbgPrint("%S: Starting routine of USBlocker. DriverEntry located at %8.81X\n",DRV_NAME,DriverObject);
-	//DbgPrint(DRV_NAME ": Hello from USBlocker!\n",DRV_NAME));
-	
-	RTL_OSVERSIONINFOW osvi;
-	bool isAtLeastXP;
-	RtlZeroMemory(&osvi,sizeof(RTL_OSVERSIONINFOW));
-	osvi.dwOSVersionInfoSize = sizeof(RTL_OSVERSIONINFOW);
-	RtlGetVersion(&osvi);
-	
-	if(!IoIsWdmVersionAvailable(1,0x20))
-	{
-		isAtLeastXP = ((osvi.dwMajorVersion == 5 || osvi.dwMajorVersion > 5 )&& osvi.dwMinorVersion >=1);
-		if (!isAtLeastXP)
-		{
-			KdPrint(("%S: USBlocker is not supported for windows under XP!",DRV_NAME));
-			DbgPrint("%S: USBlocker is not supported for windows under XP!",DRV_NAME);
-			return STATUS_UNSUCCESSFUL;
-		}
-		
-	}
-
+				
+	status = STATUS_SUCCESS;
 	srvkey.Buffer = (PWSTR)ExAllocatePool(NonPagedPool,RegistryPath->MaximumLength);
 	if(srvkey.Buffer==NULL)
 	{
-		KdPrint(("%S: There's not enough memory for ServiceKey allocation.", DRV_NAME));
-		DbgPrint("%S: There's not enough memory for ServiceKey allocation.", DRV_NAME);
-		return STATUS_INSUFFICIENT_RESOURCES;
+		status = STATUS_INSUFFICIENT_RESOURCES;
+
+		DEBUG_EXIT_FUNCTION("0x%x", status);
+		return status;
 	}
+
 	srvkey.MaximumLength = RegistryPath->MaximumLength;
 	RtlCopyUnicodeString((PUNICODE_STRING)srvkey.Buffer,(PUNICODE_STRING)RegistryPath->Buffer);
-
-
 	for (i = 0; i <= IRP_MJ_MAXIMUM_FUNCTION; i++)
 		DriverObject->MajorFunction[i] = USBlockerDispatchAny;
 
@@ -104,25 +84,26 @@ NTSTATUS DriverEntry(IN PDRIVER_OBJECT DriverObject, IN PUNICODE_STRING  Registr
 	DriverObject->MajorFunction[IRP_MJ_PNP] = USBlockerPnP;
 	DriverObject->MajorFunction[IRP_MJ_POWER] = dispatchPower;
 	DriverObject->MajorFunction[IRP_MJ_INTERNAL_DEVICE_CONTROL]= IOControl;
-	//DriverObject->MajorFunction[IRP_MJ_SYSTEM_CONTROL]=wmiControl;
-	//DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL]=dispatchIOCTL;
 
 	DriverObject->DriverUnload = USBlockerUnload;
-	DriverObject->DriverStartIo = NULL;
 	DriverObject->DriverExtension->AddDevice = USBlockerAddDevice;
 
-	return STATUS_SUCCESS;
+	DEBUG_EXIT_FUNCTION("0x%x", status);
+	return status;
 }
 
 
 //set information and status of IoStatus member of IRP request in order to complete it
-NTSTATUS CompleteRequest(IN PIRP Irp, IN NTSTATUS status, IN ULONG_PTR info)
+VOID CompleteRequest(IN PIRP Irp, IN NTSTATUS Status, IN ULONG_PTR Information)
 {
-	Irp->IoStatus.Status = status;
-	Irp->IoStatus.Information = info;
+	DEBUG_ENTER_FUNCTION("Irp=0x%p; Status=0x%x; Information=%u", Irp, Status, Information);
+
+	Irp->IoStatus.Status = Status;
+	Irp->IoStatus.Information = Information;
 	IoCompleteRequest(Irp,IO_NO_INCREMENT);
 
-	return status;
+	DEBUG_EXIT_FUNCTION_VOID();
+	return;
 }
 
 
@@ -130,16 +111,18 @@ VOID USBlockerUnload(IN PDRIVER_OBJECT DriverObject)
 {
 
 	PAGED_CODE();
-	KdPrint(("%S: Goodbye from USBlocker!\n",DRV_NAME));
-	DbgPrint("%S: Goodbye from USBlocker!\n",DRV_NAME);
+	DEBUG_ENTER_FUNCTION("DriverObject=0x%p", DriverObject);
+
 	//free registryPath
 	if(srvkey.Buffer)
 	{
 		ExFreePool(srvkey.Buffer);
 		srvkey.Buffer = NULL;
 	}
+
 	IoDeleteDevice(DriverObject->DeviceObject);
-	KdPrint(("%S: Device unload finished.\n",DRV_NAME));
+
+	DEBUG_EXIT_FUNCTION_VOID();
 	return;
 }
 
@@ -148,8 +131,11 @@ NTSTATUS USBlockerCreateClose(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 {
 	PUSBlocker_DEVICE_EXTENSION dex = (PUSBlocker_DEVICE_EXTENSION)DeviceObject->DeviceExtension;
 	PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(Irp);
-	NTSTATUS status;
+	NTSTATUS status = STATUS_UNSUCCESSFUL;
+	DEBUG_ENTER_FUNCTION("DeviceObject=0x%p; Irp=0x%p", DeviceObject, Irp);
 
+	dex = (PUSBlocker_DEVICE_EXTENSION)DeviceObject->DeviceExtension;
+	stack = IoGetCurrentIrpStackLocation(Irp);
 	status = IoAcquireRemoveLock(&dex->RemoveLock,Irp);
 	if(!NT_SUCCESS(status))
 	{
@@ -158,6 +144,7 @@ NTSTATUS USBlockerCreateClose(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 		// We completed the IRP, so it belongs to I/O manager, not to us.
 		// It might actually be freed, so we must not touch it anymore.
 		// Let's return.
+		DEBUG_EXIT_FUNCTION("0x%x", status);
 		return status;
 	}
 
@@ -182,21 +169,32 @@ NTSTATUS USBlockerCreateClose(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 		IoSkipCurrentIrpStackLocation(Irp);
 		status = IoCallDriver(dex->lowerDeviceObject,Irp);
 		break;
+	case IRP_MJ_CLEANUP:
+		DbgPrint("%S: entering in IRP_MJ_CLEANUP.\n", DRV_NAME);
+		// We are not registering the completion routine, nor using our
+		// stack location for any other purpose. So, we can just skip it
+		// and provide it to the lower driver instead of copying it
+		// (although skipping or copying... it actually does not matter).
+		IoSkipCurrentIrpStackLocation(Irp);
+		status = IoCallDriver(dex->lowerDeviceObject, Irp);
+		break;
 	default:
 		break;
 	}
 
 	IoReleaseRemoveLock(&dex->RemoveLock, Irp);
 
+	DEBUG_EXIT_FUNCTION("0x%x", status);
 	return status;
 }
 
 
 NTSTATUS USBlockerDispatchAny(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 {
-	NTSTATUS status;
+	NTSTATUS status = STATUS_UNSUCCESSFUL;
 	PUSBlocker_DEVICE_EXTENSION deviceExtension = NULL;
-	
+	DEBUG_ENTER_FUNCTION("DeviceObject=0x%p; Irp=0x%p", DeviceObject, Irp);
+
 	deviceExtension = (PUSBlocker_DEVICE_EXTENSION)DeviceObject->DeviceExtension;
 	status = IoAcquireRemoveLock(&deviceExtension->RemoveLock,Irp);
 	if(!NT_SUCCESS(status))
@@ -206,6 +204,7 @@ NTSTATUS USBlockerDispatchAny(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 		// We completed the IRP, so it belongs to I/O manager, not to us.
 		// It might actually be freed, so we must not touch it anymore.
 		// Let's return.
+		DEBUG_EXIT_FUNCTION("0x%x", status);
 		return status;
 	}
 
@@ -213,29 +212,27 @@ NTSTATUS USBlockerDispatchAny(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 	status = IoCallDriver(deviceExtension->lowerDeviceObject, Irp);
 	IoReleaseRemoveLock(&deviceExtension->RemoveLock,Irp);
 	
+	DEBUG_EXIT_FUNCTION("0x%x", status);
 	return status;
 }
 
 
 NTSTATUS USBlockerAddDevice(IN PDRIVER_OBJECT  DriverObject, IN PDEVICE_OBJECT  PhysicalDeviceObject)
 {
+	NTSTATUS status = STATUS_UNSUCCESSFUL;
+	 DEBUG_ENTER_FUNCTION("DriverObject=0x%p; PhysicalDeviceObject=0x%p", DriverObject, PhysicalDeviceObject);
+	 PAGED_CODE();
 
-	 PAGED_CODE(); //check current irql whether is pageable?
-	 //i should add pragma at first for these routines
-
+	 status = STATUS_SUCCESS;
 	//determine whether driver is running in safe mode or not
 	if(*InitSafeBootMode > 0)
 	{
-		DbgPrint("%S: The operating system is in Safe Mode.\n",DRV_NAME);
-		return STATUS_SUCCESS;
+		DEBUG_EXIT_FUNCTION("0x%x", status);
+		return status;
 	}
-
-	KdPrint(("%S: USBlocker AddDevice routine.\n",DRV_NAME));
-	DbgPrint("%S: USBlocker AddDevice routine.\n",DRV_NAME);
 
 	PDEVICE_OBJECT fido = NULL;
 	PUSBlocker_DEVICE_EXTENSION pdx = NULL;
-	NTSTATUS status = STATUS_UNSUCCESSFUL;
 	PDEVICE_OBJECT highestDO = IoGetAttachedDeviceReference(PhysicalDeviceObject);
 
 	status = IoCreateDevice(DriverObject,
@@ -250,8 +247,8 @@ NTSTATUS USBlockerAddDevice(IN PDRIVER_OBJECT  DriverObject, IN PDEVICE_OBJECT  
 	if (!NT_SUCCESS(status))
 	{
 		//DBGUSBlock: Cannot Create Device Object. Status C0000035 ~ STATUS_OBJECT_NAME_COLLISION
-		KdPrint(("%S: Cannot Create Device Object. Status %X\n",DRV_NAME,status));
-		DbgPrint("%S: Cannot Create Device Object. Status %X\n",DRV_NAME,status);
+
+		DEBUG_EXIT_FUNCTION("0x%x", status);
 		return status;
 	}
 
@@ -267,10 +264,10 @@ NTSTATUS USBlockerAddDevice(IN PDRIVER_OBJECT  DriverObject, IN PDEVICE_OBJECT  
 	status = IoAttachDeviceToDeviceStackSafe(fido, PhysicalDeviceObject, &pdx->lowerDeviceObject);
 	if(!NT_SUCCESS(status))
 	{
-		KdPrint(("%S: Cannot attach device to device stack.\n",DRV_NAME) );
-		DbgPrint("%S: Cannot attach device to device stack.\n",DRV_NAME);
 		IoDeleteDevice(fido);
-		return STATUS_DEVICE_NOT_CONNECTED;
+
+		DEBUG_EXIT_FUNCTION("0x%x", status);
+		return status;
 	}
 		
 	status = IoRegisterDeviceInterface(PhysicalDeviceObject, &GUID_USBlockerInterface, NULL, &pdx->DeviceInterface);
@@ -279,6 +276,7 @@ NTSTATUS USBlockerAddDevice(IN PDRIVER_OBJECT  DriverObject, IN PDEVICE_OBJECT  
 		IoDetachDevice(pdx->lowerDeviceObject);
 		IoDeleteDevice(fido);
 		
+		DEBUG_EXIT_FUNCTION("0x%x", status);
 		return status;
 	}
 
@@ -289,7 +287,8 @@ NTSTATUS USBlockerAddDevice(IN PDRIVER_OBJECT  DriverObject, IN PDEVICE_OBJECT  
 
 	fido->Flags &= ~DO_DEVICE_INITIALIZING;
 
-	return STATUS_SUCCESS;
+	DEBUG_EXIT_FUNCTION("0x%x", status);
+	return status;
 }
 
 
@@ -300,12 +299,14 @@ NTSTATUS USBlockerIrpCompletion(
 					  )
 {
 	PKEVENT Event = (PKEVENT) Context;
+	DEBUG_ENTER_FUNCTION("DeviceObject=0x%p; Irp=0x%p; Context=0x%p", DeviceObject, Irp, Context);
 
 	UNREFERENCED_PARAMETER(DeviceObject);
 	UNREFERENCED_PARAMETER(Irp);
 
 	KeSetEvent(Event, IO_NO_INCREMENT, FALSE);
 
+	DEBUG_EXIT_FUNCTION("0x%x", STATUS_MORE_PROCESSING_REQUIRED);
 	return STATUS_MORE_PROCESSING_REQUIRED;
 }
 
@@ -315,24 +316,22 @@ NTSTATUS USBlockerForwardIrpSynchronous(
 							  IN PIRP Irp
 							  )
 {
-	PUSBlocker_DEVICE_EXTENSION   deviceExtension;
 	KEVENT event;
-	NTSTATUS status;
+	NTSTATUS status = STATUS_UNSUCCESSFUL;
+	PUSBlocker_DEVICE_EXTENSION deviceExtension = NULL;
+	DEBUG_ENTER_FUNCTION("DeviceObject=0x%p; Irp=0x%p", DeviceObject, Irp);
 
 	KeInitializeEvent(&event, NotificationEvent, FALSE);
 	deviceExtension = (PUSBlocker_DEVICE_EXTENSION)DeviceObject->DeviceExtension;
-
 	IoCopyCurrentIrpStackLocationToNext(Irp);
-
 	IoSetCompletionRoutine(Irp, USBlockerIrpCompletion, &event, TRUE, TRUE, TRUE);
-
 	status = IoCallDriver(deviceExtension->lowerDeviceObject, Irp);
-
 	if (status == STATUS_PENDING) {
 		KeWaitForSingleObject(&event, Executive, KernelMode, FALSE, NULL);
 		status = Irp->IoStatus.Status;
 	}
 
+	DEBUG_EXIT_FUNCTION("0x%x", status);
 	return status;
 }
 
@@ -341,10 +340,13 @@ NTSTATUS dispatchPower(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 {
 	NTSTATUS status = STATUS_UNSUCCESSFUL;
 	PUSBlocker_DEVICE_EXTENSION pdx = (PUSBlocker_DEVICE_EXTENSION)DeviceObject->DeviceExtension;
+	DEBUG_ENTER_FUNCTION("DeviceObject=0x%p; Irp=0x%p", DeviceObject, Irp);
 
 	status = IoAcquireRemoveLock(&pdx->RemoveLock, Irp);
 	if (!NT_SUCCESS(status)) {
 		CompleteRequest(Irp, status, 0);
+		
+		DEBUG_EXIT_FUNCTION("0x%x", status);
 		return status;
 	}
 
@@ -353,6 +355,7 @@ NTSTATUS dispatchPower(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 	status = PoCallDriver(pdx->lowerDeviceObject, Irp);
 	IoReleaseRemoveLock(&pdx->RemoveLock, Irp);
 
+	DEBUG_EXIT_FUNCTION("0x%x", status);
 	return status;
 }
 
@@ -470,7 +473,12 @@ NTSTATUS USBCall(IN PDEVICE_OBJECT DeviceObject, IN PURB urb,IN PIRP Irp)
 	ULONG IoControlCode = IOCTL_INTERNAL_USB_SUBMIT_URB;
 	
 	status = IoAcquireRemoveLock(&dxe->RemoveLock,Irp);
-	if(!NT_SUCCESS(status)) return CompleteRequest(Irp,status,0);
+	if (!NT_SUCCESS(status)) {
+		CompleteRequest(Irp, status, 0);
+	
+		DEBUG_EXIT_FUNCTION("0x%x", status);
+		return status;
+	}
 
 	KeInitializeEvent(&Event,NotificationEvent,FALSE);
 
@@ -526,8 +534,12 @@ NTSTATUS IOControl(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 	ULONG ioControlCode = stack->Parameters.DeviceIoControl.IoControlCode;
 	
 	status = IoAcquireRemoveLock(&dex->RemoveLock, Irp);
-	if (!NT_SUCCESS(status))
-		return CompleteRequest(Irp, status, 0);
+	if (!NT_SUCCESS(status)) {
+		CompleteRequest(Irp, status, 0);
+	
+		DEBUG_EXIT_FUNCTION("0x%x", status);
+		return status;
+	}
 
 	switch(ioControlCode)
 	{
@@ -594,6 +606,7 @@ NTSTATUS IOControl(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 	return status;
 
 }
+
 
 NTSTATUS inspectReturnedURB(IN PDEVICE_OBJECT fdio, IN PIRP Irp, IN KEVENT Context)
 {
@@ -866,11 +879,16 @@ NTSTATUS USBlockerPnP(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 	PIO_STACK_LOCATION irpSp = IoGetCurrentIrpStackLocation(Irp);
 	PUSBlocker_DEVICE_EXTENSION pdx = (PUSBlocker_DEVICE_EXTENSION)DeviceObject->DeviceExtension;
 	PAGED_CODE();
+	DEBUG_ENTER_FUNCTION("DeviceObject=0x%p; Irp=0x%p", DeviceObject, Irp);
 
 	status = IoAcquireRemoveLock(&pdx->RemoveLock,Irp);
-	if(!NT_SUCCESS(status)) 
-		return CompleteRequest(Irp,status,0);
+	if (!NT_SUCCESS(status)) {
+		CompleteRequest(Irp, status, 0);
 	
+		DEBUG_EXIT_FUNCTION("0x%x", status);
+		return status;
+	}
+
 	switch (irpSp->MinorFunction)
 	{
 	case IRP_MN_START_DEVICE:
@@ -896,6 +914,7 @@ NTSTATUS USBlockerPnP(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 		IoReleaseRemoveLock(&pdx->RemoveLock,Irp);
 	}
 
+	DEBUG_EXIT_FUNCTION("0x%x", status);
 	return status;
 }
 

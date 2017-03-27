@@ -27,6 +27,9 @@
     <ClInclude Include="public.h">
       <Filter>Header files</Filter>
     </ClInclude>
+    <ClInclude Include="debug-macros.h">
+      <Filter>Header files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="stdafx.cpp">
