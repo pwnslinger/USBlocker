@@ -348,66 +348,30 @@ NTSTATUS USBlockerForwardIrpSynchronous(
 		KeWaitForSingleObject(&event, Executive, KernelMode, FALSE, NULL);
 		status = Irp->IoStatus.Status;
 	}
+
 	return status;
 }
+
 
 NTSTATUS dispatchPower(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 {
+	NTSTATUS status = STATUS_UNSUCCESSFUL;
 	PUSBlocker_DEVICE_EXTENSION pdx = (PUSBlocker_DEVICE_EXTENSION)DeviceObject->DeviceExtension;
-	//check if vista or win 7
-	if(isAboveVista())
-	{
-		KdPrint(("%S: Windows Vista or later detected.\n",DRV_NAME));
-		NTSTATUS status =  IoAcquireRemoveLock(&pdx->RemoveLock,Irp);
-		if(!NT_SUCCESS(status)) return CompleteRequest(Irp,status,0);
 
-		IoSkipCurrentIrpStackLocation(Irp);
-		status = IoCallDriver(pdx->lowerDeviceObject,Irp);
-		KdPrint(("%S: Passing IRP to the lower filter driver.\n",DRV_NAME));
-		IoReleaseRemoveLock(&pdx->RemoveLock,Irp);
+	status = IoAcquireRemoveLock(&pdx->RemoveLock, Irp);
+	if (!NT_SUCCESS(status)) {
+		CompleteRequest(Irp, status, 0);
 		return status;
 	}
 
-	else
-	{
-	KdPrint(("%S: Windows 2003 or lower detected.\n",DRV_NAME));
 	PoStartNextPowerIrp(Irp);
-
-	//get remove lock before pass IRP down to the driver stack
-	NTSTATUS status =  IoAcquireRemoveLock(&pdx->RemoveLock,Irp);
-	if(!NT_SUCCESS(status)) return CompleteRequest(Irp,status,0);
-
 	IoSkipCurrentIrpStackLocation(Irp);
-	status = PoCallDriver(pdx->lowerDeviceObject,Irp);
-	KdPrint(("%S: Passing IRP to the lower filter driver.\n",DRV_NAME));
-	IoReleaseRemoveLock(&pdx->RemoveLock,Irp);
+	status = PoCallDriver(pdx->lowerDeviceObject, Irp);
+	IoReleaseRemoveLock(&pdx->RemoveLock, Irp);
+
 	return status;
-	}
-	
 }
 
-NTSTATUS startDeviceCompletionRoutine(IN PDEVICE_OBJECT fdio, IN PIRP Irp, IN PVOID Context)
-{
-	PKEVENT eventStart = (PKEVENT)Context;
-	ASSERT(eventStart);
-	//PUSBlocker_DEVICE_EXTENSION pdx = (PUSBlocker_DEVICE_EXTENSION)fdio->DeviceExtension;
-	//NTSTATUS status=STATUS_SUCCESS;
-	KIRQL irql = KeGetCurrentIrql();
-
-	KdPrint(("%S: Entering completionRoutine with %d IRQL.\n", DRV_NAME,irql));
-	DbgPrint("%S: Entering completionRoutine with %s IRQL.\n", DRV_NAME, (irql=0) ? "PASSIVE_LEVEL" : "DISPATCH_LEVEL");
-	
-	if(Irp->PendingReturned)
-	{
-		//IoMarkIrpPending(Irp);
-		KeSetEvent(eventStart,IO_NO_INCREMENT,FALSE); //set event in which dispatch routine is waiting for that
-		DbgPrint("%S: set kevent which dispatch routine waits for that in case of returning status_pending.\n", DRV_NAME);
-	}
-
-	DbgPrint("%S: leaving out driver io completion routine with IRQL = %s.\n", DRV_NAME, (irql=0) ? "PASSIVE_LEVEL" : "DISPATCH_LEVEL");
-	
-	return STATUS_MORE_PROCESSING_REQUIRED;
-}
 
 NTSTATUS getDeviceDescriptor(IN PDEVICE_OBJECT DeviceObject,IN PIRP Irp)
 {
@@ -928,104 +892,45 @@ NTSTATUS USBlockerPnP(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 	PIO_STACK_LOCATION irpSp = IoGetCurrentIrpStackLocation(Irp);
 	PUSBlocker_DEVICE_EXTENSION pdx = (PUSBlocker_DEVICE_EXTENSION)DeviceObject->DeviceExtension;
 	NTSTATUS status;
-	KEVENT startDevice;
 
 	ASSERT(pdx);
 	status = IoAcquireRemoveLock(&pdx->RemoveLock,Irp);
-	if(!NT_SUCCESS(status)) return CompleteRequest(Irp,status,0);
-
-	//check for whether completion routine get completed or not
-	KeInitializeEvent(&startDevice,NotificationEvent,FALSE);
+	if(!NT_SUCCESS(status)) 
+		return CompleteRequest(Irp,status,0);
 	
 	switch (irpSp->MinorFunction)
 	{
 	case IRP_MN_START_DEVICE:
-		KdPrint(("%S: IRP_MJ_PNP (IRP_MN_START_DEVICE) IRQL: %d\n", DRV_NAME,KeGetCurrentIrql()));
-		DbgPrint("%S: IRP_MJ_PNP (IRP_MN_START_DEVICE) IRQL: %d\n", DRV_NAME,KeGetCurrentIrql());
+		status = USBlockerForwardIrpSynchronous(DeviceObject, Irp);
+		if (NT_SUCCESS(status))
+			status = IoSetDeviceInterfaceState(&pdx->DeviceInterface, TRUE);
 
-		IoCopyCurrentIrpStackLocationToNext(Irp);
-		IoSetCompletionRoutine(Irp,(PIO_COMPLETION_ROUTINE)startDeviceCompletionRoutine,(PVOID)&startDevice,TRUE,TRUE,TRUE);
-		status = IoCallDriver(pdx->lowerDeviceObject,Irp);
-		
-		DbgPrint("%S: Returning from low level device driver.\n",DRV_NAME);
-
-		if(status==STATUS_PENDING)
-		{
-			KdPrint(("%S: waiting for lower-level driver to complete request.\n",DRV_NAME));
-			DbgPrint("%S: waiting for lower-level driver to complete request.\n",DRV_NAME);
-			//wait if status returned from lower-driver is pending	
-			//wait more to event get completed
-			KeWaitForSingleObject(&startDevice,Executive,KernelMode,FALSE,NULL);
-			//completion routine always reclaim IRP by returning STATUS_MORE_PROCESSING_REQUIRED by signaling to kernel event we set in completion routine
-			status=Irp->IoStatus.Status;
-		}
-
-		if(!NT_SUCCESS(status))
-		{	
-			KdPrint(("%S: Lower driver cannot process this IRP.\n",DRV_NAME));
-			DbgPrint("%S: Lower driver cannot process this IRP.\n",DRV_NAME);
-			return status;
-		}
-		
-		DbgPrint("%S: Setting up device interface state.\n",DRV_NAME);
-
-		Irp->IoStatus.Status=status;
-		Irp->IoStatus.Information=0;
-
-		IoSetDeviceInterfaceState(&pdx->DeviceInterface,TRUE);
-
-		DbgPrint("%S: Symbolic Link Name is %s. \n",DRV_NAME,&pdx->DeviceInterface.Buffer);
-
+		Irp->IoStatus.Status = status;
 		IoCompleteRequest(Irp,IO_NO_INCREMENT); //should be called from dispatcher routine not from completion routine
-		//status = getDeviceDescriptor(DeviceObject,Irp);
 		IoReleaseRemoveLock(&pdx->RemoveLock,Irp);
-
-		DbgPrint("%S: Releasing remove lock of start device routine.\n",DRV_NAME);
-
-		return status;
-
-		
+	
 	case IRP_MN_QUERY_REMOVE_DEVICE:
-		Irp->IoStatus.Status = STATUS_SUCCESS;
-		IoCompleteRequest(Irp, IO_NO_INCREMENT);
+		IoSkipCurrentIrpStackLocation(Irp);
+		status = IoCallDriver(pdx->lowerDeviceObject, Irp);
 		IoReleaseRemoveLock(&pdx->RemoveLock,Irp);
-		return STATUS_SUCCESS;
 
 	case IRP_MN_REMOVE_DEVICE:
-
-		IoReleaseRemoveLockAndWait(&pdx->RemoveLock,Irp);
-		//status = USBlockerForwardIrpSynchronous(DeviceObject, Irp);
-		DbgPrint("%S: PNP remove called.\n",DRV_NAME);
-
-		//disable device interface state
 		IoSetDeviceInterfaceState(&pdx->DeviceInterface,FALSE);
-
-		IoCopyCurrentIrpStackLocationToNext(Irp);
+		IoReleaseRemoveLockAndWait(&pdx->RemoveLock, Irp);
+		IoSkipCurrentIrpStackLocation(Irp);
 		status = IoCallDriver(pdx->lowerDeviceObject,Irp);
-
 		IoDetachDevice(pdx->lowerDeviceObject);
-
-		RtlFreeUnicodeString(&pdx->DeviceInterface);
 		IoDeleteDevice(pdx->DeviceObject);
-		
-		return status;
-
-	case IRP_MN_QUERY_PNP_DEVICE_STATE:
-		status = USBlockerForwardIrpSynchronous(DeviceObject, Irp);
-		Irp->IoStatus.Information = 0;
-		IoCompleteRequest(Irp, IO_NO_INCREMENT);
-		IoReleaseRemoveLock(&pdx->RemoveLock,Irp);
-		return status;
 
 	default:
 		IoSkipCurrentIrpStackLocation(Irp);
-		status=IoCallDriver(pdx->lowerDeviceObject,Irp);
+		status = IoCallDriver(pdx->lowerDeviceObject,Irp);
 		IoReleaseRemoveLock(&pdx->RemoveLock,Irp);
-		//IoReleaseRemoveLock(&pdx->RemoveLock,Irp);
-		return status;
 	}
-	//return USBlockerDispatchAny(DeviceObject, Irp);
+
+	return status;
 }
+
 
 void dumpBuffer(IN ULONG bufSize,IN PVOID pBuffer, IN PMDL pMdl)
 {
