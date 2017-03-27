@@ -34,6 +34,8 @@ NTSTATUS USBlockerAddDevice(IN PDRIVER_OBJECT  DriverObject, IN PDEVICE_OBJECT  
 NTSTATUS USBlockerPnP(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
 NTSTATUS USBlockerIOCTL(PDEVICE_OBJECT DeviceObject, PIRP Irp);
 NTSTATUS USBlockerInternalIOCTL(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
+//NTSTATUS wmiControl(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
+//NTSTATUS dispatchIOCTL(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
 NTSTATUS dispatchPower(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
 NTSTATUS getDeviceDescriptor(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
 NTSTATUS USBCall(IN PDEVICE_OBJECT DeviceObject, IN PURB urb, IN PIRP Irp);
@@ -84,6 +86,7 @@ NTSTATUS DriverEntry(IN PDRIVER_OBJECT DriverObject, IN PUNICODE_STRING  Registr
 	DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = USBlockerIOCTL;
 	DriverObject->MajorFunction[IRP_MJ_INTERNAL_DEVICE_CONTROL]= USBlockerInternalIOCTL;
 
+
 	DriverObject->DriverUnload = USBlockerUnload;
 	DriverObject->DriverExtension->AddDevice = USBlockerAddDevice;
 
@@ -118,6 +121,8 @@ VOID USBlockerUnload(IN PDRIVER_OBJECT DriverObject)
 		ExFreePool(srvkey.Buffer);
 		srvkey.Buffer = NULL;
 	}
+
+	IoDeleteDevice(DriverObject->DeviceObject);
 
 	DEBUG_EXIT_FUNCTION_VOID();
 	return;

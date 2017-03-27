@@ -369,6 +369,10 @@
 			Filter="cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx"
 			>
 			<File
+				RelativePath=".\debug-macros.h"
+				>
+			</File>
+			<File
 				RelativePath=".\public.h"
 				>
 			</File>
@@ -421,6 +425,10 @@
 			Name="Resource files"
 			Filter="rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav"
 			>
+			<File
+				RelativePath=".\USBlocker.inf"
+				>
+			</File>
 		</Filter>
 		<Filter
 			Name="Header files"
