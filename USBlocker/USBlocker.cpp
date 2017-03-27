@@ -170,6 +170,10 @@ NTSTATUS USBlockerCreateClose(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 	{
 		CompleteRequest(Irp,status,0);
 
+		// We completed the IRP, so it belongs to I/O manager, not to us.
+		// It might actually be freed, so we must not touch it anymore.
+		// Let's return.
+		return status;
 	}
 
 	switch(stack->MajorFunction)
@@ -177,56 +181,53 @@ NTSTATUS USBlockerCreateClose(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 
 	case IRP_MJ_CREATE:
 		DbgPrint("%S: entering in IRP_MJ_CREATE.\n",DRV_NAME);
-		IoCopyCurrentIrpStackLocationToNext(Irp);
+		// We are not registering the completion routine, nor using our
+		// stack location for any other purpose. So, we can just skip it
+		// and provide it to the lower driver instead of copying it
+		// (although skipping or copying... it actually does not matter).
+		IoSkipCurrentIrpStackLocation(Irp);
 		status = IoCallDriver(dex->lowerDeviceObject,Irp);
-		IoReleaseRemoveLock(&dex->RemoveLock,Irp);
 		break;
-
 	case IRP_MJ_CLOSE:
 		DbgPrint("%S: entering in IRP_MJ_CLOSE.\n",DRV_NAME);
-		IoCopyCurrentIrpStackLocationToNext(Irp);
+		// We are not registering the completion routine, nor using our
+		// stack location for any other purpose. So, we can just skip it
+		// and provide it to the lower driver instead of copying it
+		// (although skipping or copying... it actually does not matter).
+		IoSkipCurrentIrpStackLocation(Irp);
 		status = IoCallDriver(dex->lowerDeviceObject,Irp);
-		IoReleaseRemoveLock(&dex->RemoveLock,Irp);
 		break;
-
 	default:
 		break;
 	}
 
+	IoReleaseRemoveLock(&dex->RemoveLock, Irp);
+
 	return status;
 }
 
-unsigned long getDeviceType(IN PDEVICE_OBJECT pdo)
-{
-	PDEVICE_OBJECT rdo;
-	rdo = IoGetAttachedDeviceReference(pdo);
-
-	if(!rdo->DeviceType)
-	{
-		KdPrint(("%S: FILE_DEVICE_UNKNOWN\n",DRV_NAME));
-		return FILE_DEVICE_UNKNOWN;
-	}
-
-	return rdo->DeviceType;
-}
 
 NTSTATUS USBlockerDispatchAny(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 {
-	PAGED_CODE();
-
 	NTSTATUS status;
 	PUSBlocker_DEVICE_EXTENSION deviceExtension = NULL;
+	
 	deviceExtension = (PUSBlocker_DEVICE_EXTENSION)DeviceObject->DeviceExtension;
 	status = IoAcquireRemoveLock(&deviceExtension->RemoveLock,Irp);
 	if(!NT_SUCCESS(status))
 	{
 		CompleteRequest(Irp,status,0);
 
+		// We completed the IRP, so it belongs to I/O manager, not to us.
+		// It might actually be freed, so we must not touch it anymore.
+		// Let's return.
+		return status;
 	}
 
 	IoSkipCurrentIrpStackLocation(Irp);
 	status = IoCallDriver(deviceExtension->lowerDeviceObject, Irp);
 	IoReleaseRemoveLock(&deviceExtension->RemoveLock,Irp);
+	
 	return status;
 }
 
