@@ -1,3 +1,7 @@
+
+#ifndef __USBBLOCKER_H__
+#define __USBBLOCKER_H__
+
 //#define DEV_NAME L"\\Device\\USBFilterTest"
 //#define GLOB_NAME L"\\DosDevices\\USBlocker"
 //#define DRV_NAME "DBGUSBlock"
@@ -34,3 +38,7 @@ typedef struct _DEVICE_EXTENSION
 	IO_REMOVE_LOCK RemoveLock; //remove lock protection ; ensure device object
 	//won't delete during IRP processing unless otherwise removeLock has been released
 } USBlocker_DEVICE_EXTENSION, *PUSBlocker_DEVICE_EXTENSION;
+
+
+
+#endif
