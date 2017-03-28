@@ -899,7 +899,7 @@ NTSTATUS USBlockerPnP(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 		Irp->IoStatus.Status = status;
 		IoCompleteRequest(Irp,IO_NO_INCREMENT); //should be called from dispatcher routine not from completion routine
 		IoReleaseRemoveLock(&pdx->RemoveLock,Irp);
-
+		break;
 	case IRP_MN_REMOVE_DEVICE:
 		IoSetDeviceInterfaceState(&pdx->DeviceInterface,FALSE);
 		IoReleaseRemoveLockAndWait(&pdx->RemoveLock, Irp);
@@ -907,11 +907,12 @@ NTSTATUS USBlockerPnP(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 		status = IoCallDriver(pdx->lowerDeviceObject,Irp);
 		IoDetachDevice(pdx->lowerDeviceObject);
 		IoDeleteDevice(pdx->DeviceObject);
-
+		break;
 	default:
 		IoSkipCurrentIrpStackLocation(Irp);
 		status = IoCallDriver(pdx->lowerDeviceObject,Irp);
 		IoReleaseRemoveLock(&pdx->RemoveLock,Irp);
+		break;
 	}
 
 	DEBUG_EXIT_FUNCTION("0x%x", status);
