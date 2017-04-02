@@ -18,7 +18,7 @@ Addreg    = USBlocker.AddReg
 DefaultDestDir=12 ; DIRID_DRIVERS
 
 [USBlocker.AddReg]
-HKLM, System\CurrentControlSet\Control\Class\{36fc9e60-c465-11cf-8056-444553540000}, UpperFilters, 0x00010008, USBlocker
+HKLM, System\CurrentControlSet\Control\Class\{36fc9e60-c465-11cf-8056-444553540000}, LowerFilters, 0x00010008, USBlocker
 
 [DefaultInstall.Services]
 AddService = USBlocker, , USBlocker.Service.Install
