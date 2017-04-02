@@ -529,8 +529,11 @@ NTSTATUS IOControl(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 	PURB urb;
 	KEVENT startDevice;
 	PUSBlocker_DEVICE_EXTENSION dex = (PUSBlocker_DEVICE_EXTENSION)DeviceObject->DeviceExtension;
+	DEBUG_ENTER_FUNCTION("DeviceObject=0x%p; Irp=0x%p", DeviceObject, Irp);
 
 	stack = IoGetCurrentIrpStackLocation(Irp);
+	DEBUG_MSG("Major=%u, Minor=%u, IoControlCode=0x%x", stack->MajorFunction, stack->MinorFunction, stack->Parameters.DeviceIoControl.IoControlCode);
+	
 	ULONG ioControlCode = stack->Parameters.DeviceIoControl.IoControlCode;
 	
 	status = IoAcquireRemoveLock(&dex->RemoveLock, Irp);
@@ -603,6 +606,8 @@ NTSTATUS IOControl(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 	}
 
 	IoReleaseRemoveLock(&dex->RemoveLock, Irp);
+	
+	DEBUG_EXIT_FUNCTION("0x%x", status);
 	return status;
 
 }

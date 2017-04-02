@@ -3,8 +3,9 @@
 #define __DEBUG_MACROS_H__
 
 
+#define USE_DEBUG_PRINTS
 
-#ifdef DBG
+#ifdef USE_DEBUG_PRINTS
 
 #define DBGM_TRACE_LEVEL		DPFLTR_ERROR_LEVEL
 
