@@ -29,13 +29,11 @@
 VOID USBlockerUnload(IN PDRIVER_OBJECT DriverObject);
 VOID dumpBuffer(IN ULONG bufSize,IN PVOID pBuffer, IN PMDL pMdl);
 NTSTATUS USBlockerCreateClose(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
-//NTSTATUS USBlockerCreate(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
 NTSTATUS USBlockerDispatchAny(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
 NTSTATUS USBlockerAddDevice(IN PDRIVER_OBJECT  DriverObject, IN PDEVICE_OBJECT  PhysicalDeviceObject);
 NTSTATUS USBlockerPnP(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
-NTSTATUS IOControl(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
-//NTSTATUS wmiControl(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
-//NTSTATUS dispatchIOCTL(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
+NTSTATUS USBlockerIOCTL(PDEVICE_OBJECT DeviceObject, PIRP Irp);
+NTSTATUS USBlockerInternalIOCTL(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
 NTSTATUS dispatchPower(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
 NTSTATUS getDeviceDescriptor(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
 NTSTATUS USBCall(IN PDEVICE_OBJECT DeviceObject, IN PURB urb, IN PIRP Irp);
@@ -83,7 +81,8 @@ NTSTATUS DriverEntry(IN PDRIVER_OBJECT DriverObject, IN PUNICODE_STRING  Registr
 	DriverObject->MajorFunction[IRP_MJ_CLOSE] = USBlockerCreateClose;
 	DriverObject->MajorFunction[IRP_MJ_PNP] = USBlockerPnP;
 	DriverObject->MajorFunction[IRP_MJ_POWER] = dispatchPower;
-	DriverObject->MajorFunction[IRP_MJ_INTERNAL_DEVICE_CONTROL]= IOControl;
+	DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = USBlockerIOCTL;
+	DriverObject->MajorFunction[IRP_MJ_INTERNAL_DEVICE_CONTROL]= USBlockerInternalIOCTL;
 
 	DriverObject->DriverUnload = USBlockerUnload;
 	DriverObject->DriverExtension->AddDevice = USBlockerAddDevice;
@@ -119,8 +118,6 @@ VOID USBlockerUnload(IN PDRIVER_OBJECT DriverObject)
 		ExFreePool(srvkey.Buffer);
 		srvkey.Buffer = NULL;
 	}
-
-	IoDeleteDevice(DriverObject->DeviceObject);
 
 	DEBUG_EXIT_FUNCTION_VOID();
 	return;
@@ -521,7 +518,35 @@ NTSTATUS USBCall(IN PDEVICE_OBJECT DeviceObject, IN PURB urb,IN PIRP Irp)
 	
 }
 
-NTSTATUS IOControl(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
+
+NTSTATUS USBlockerIOCTL(PDEVICE_OBJECT DeviceObject, PIRP Irp)
+{
+	PIO_STACK_LOCATION stack = NULL;
+	NTSTATUS status = STATUS_UNSUCCESSFUL;
+	PUSBlocker_DEVICE_EXTENSION dex = (PUSBlocker_DEVICE_EXTENSION)DeviceObject->DeviceExtension;
+	DEBUG_ENTER_FUNCTION("DeviceObject=0x%p; Irp=0x%p", DeviceObject, Irp);
+
+	stack = IoGetCurrentIrpStackLocation(Irp);
+	DEBUG_MSG("Major=%u, Minor=%u, IoControlCode=0x%x", stack->MajorFunction, stack->MinorFunction, stack->Parameters.DeviceIoControl.IoControlCode);
+
+	status = IoAcquireRemoveLock(&dex->RemoveLock, Irp);
+	if (!NT_SUCCESS(status)) {
+		CompleteRequest(Irp, status, 0);
+
+		DEBUG_EXIT_FUNCTION("0x%x", status);
+		return status;
+	}
+
+	IoSkipCurrentIrpStackLocation(Irp);
+	status = IoCallDriver(dex->lowerDeviceObject, Irp);
+	IoReleaseRemoveLock(&dex->RemoveLock, Irp);
+
+	DEBUG_EXIT_FUNCTION("0x%x", status);
+	return status;
+}
+
+
+NTSTATUS USBlockerInternalIOCTL(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 {
 	NTSTATUS status;
 	PIO_STACK_LOCATION stack;
