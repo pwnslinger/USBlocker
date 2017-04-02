@@ -592,8 +592,8 @@ NTSTATUS USBlockerInternalIOCTL(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 			
 			if (pControlDescriptorRequest->Hdr.Length < sizeof(_URB_CONTROL_DESCRIPTOR_REQUEST))
 			{
-				KdPrint(("%S: IRP_MJ_INTERNAL_DEVICE_CONTROL - IOCTL_INTERNAL_USB_SUBMIT_URB - GetDescriptorFromDevice\n",DRV_NAME));
-				KdPrint(("%S: GetDescriptorFromDevice - incorrect size of urb header = %d and should be at least %d\n",DRV_NAME,pControlDescriptorRequest->Hdr.Length,sizeof(_URB_CONTROL_DESCRIPTOR_REQUEST)));
+				DEBUG_MSG("%S: IRP_MJ_INTERNAL_DEVICE_CONTROL - IOCTL_INTERNAL_USB_SUBMIT_URB - GetDescriptorFromDevice\n",DRV_NAME);
+				DEBUG_MSG("%S: GetDescriptorFromDevice - incorrect size of urb header = %d and should be at least %d\n",DRV_NAME,pControlDescriptorRequest->Hdr.Length,sizeof(_URB_CONTROL_DESCRIPTOR_REQUEST));
 			}
 
 			dumpBuffer(pControlDescriptorRequest->TransferBufferLength,pControlDescriptorRequest->TransferBuffer,pControlDescriptorRequest->TransferBufferMDL);
@@ -617,8 +617,7 @@ NTSTATUS USBlockerInternalIOCTL(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 
 			if(!NT_SUCCESS(status))
 			{	
-				KdPrint(("%S: Lower driver cannot process this IRP.\n",DRV_NAME));
-				return status;
+				DEBUG_MSG("%S: Lower driver cannot process this IRP.\n",DRV_NAME);
 			}
 
 			
@@ -644,16 +643,21 @@ NTSTATUS inspectReturnedURB(IN PDEVICE_OBJECT fdio, IN PIRP Irp, IN KEVENT Conte
 	ULONG ioControlCode = stack->Parameters.DeviceIoControl.IoControlCode;
 	PURB urb;
 	NTSTATUS status;
+	DEBUG_ENTER_FUNCTION("DeviceObject=0x%p; Irp=0x%p; Context=0x%p", fdio, Irp, Context);
 
 	if(Irp->PendingReturned) 
 		IoMarkIrpPending(Irp);
 	
 	status = Irp->IoStatus.Status; //set by lower-level driver
-	if (!NT_SUCCESS(status))
+	if (!NT_SUCCESS(status)) {
 		// Well, the URB actually failed without we helping it, so
 		// there should be no point in examining it since it might not be
 		// properly initialized
-		return STATUS_CONTINUE_COMPLETION;
+		status = STATUS_CONTINUE_COMPLETION;
+
+		DEBUG_EXIT_FUNCTION("", status);
+		return status;
+	}
 
 	if(ioControlCode==IOCTL_INTERNAL_USB_SUBMIT_URB)
 	{
@@ -899,7 +903,10 @@ NTSTATUS inspectReturnedURB(IN PDEVICE_OBJECT fdio, IN PIRP Irp, IN KEVENT Conte
 	if (!NT_SUCCESS(status))
 		Irp->IoStatus.Status = status;
 
-	return STATUS_CONTINUE_COMPLETION;
+	status = STATUS_CONTINUE_COMPLETION;
+
+	DEBUG_EXIT_FUNCTION("0x%x", status);
+	return status;
 }
 
 
