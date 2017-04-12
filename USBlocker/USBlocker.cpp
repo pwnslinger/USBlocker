@@ -587,9 +587,10 @@ NTSTATUS USBlockerInternalIOCTL(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 	case IOCTL_INTERNAL_USB_SUBMIT_IDLE_NOTIFICATION: req = L"IOCTL_INTERNAL_USB_SUBMIT_IDLE_NOTIFICATION"; break;
 	default: req=NULL; break; //default switch case 
 	}
-
+	DEBUG_MSG("%s", req);
 	if (req==L"IOCTL_INTERNAL_USB_SUBMIT_URB")
 	{
+		DEBUG_MSG("0x%x", status);
 		urb = (PURB)stack->Parameters.Others.Argument1;
 		if(( urb->UrbControlDescriptorRequest.DescriptorType==USB_STRING_DESCRIPTOR_TYPE || urb->UrbControlDescriptorRequest.DescriptorType==USB_CONFIGURATION_DESCRIPTOR_TYPE || urb->UrbControlDescriptorRequest.DescriptorType==USB_DEVICE_DESCRIPTOR_TYPE) && (urb->UrbHeader.Function==URB_FUNCTION_GET_DESCRIPTOR_FROM_DEVICE || urb->UrbHeader.Function==URB_FUNCTION_GET_DESCRIPTOR_FROM_ENDPOINT))
 		{
@@ -613,7 +614,7 @@ NTSTATUS USBlockerInternalIOCTL(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 
 			if(status==STATUS_PENDING)
 			{
-				KdPrint(("%S: waiting for lower-level driver to complete request.\n",DRV_NAME));
+				DEBUG_MSG("%S: waiting for lower-level driver to complete request.\n",DRV_NAME);
 				//wait if status returned from lower-driver is pending	
 				//wait more to event get completed
 				KeWaitForSingleObject(&startDevice,Executive,KernelMode,FALSE,NULL);
@@ -678,79 +679,79 @@ NTSTATUS inspectReturnedURB(IN PDEVICE_OBJECT fdio, IN PIRP Irp, IN KEVENT Conte
 			PUSB_DEVICE_DESCRIPTOR pDescriptor;
 			if(transferBuf)
 			{
-				if(mdlBuf) KdPrint(("%S: Unsupported descriptor request since both mdl and tbuffer is initialized.\n",DRV_NAME));
-				KdPrint(("%S: Descriptor buffer content is sending to USB hub controller = \n",DRV_NAME));
+				if(mdlBuf) DEBUG_MSG("%S: Unsupported descriptor request since both mdl and tbuffer is initialized.\n",DRV_NAME);
+				DEBUG_MSG("%S: Descriptor buffer content is sending to USB hub controller = \n",DRV_NAME);
 				//cast transferred buffer to USB_DEVICE_DESCRIPTOR type
 				pDescriptor = (PUSB_DEVICE_DESCRIPTOR)transferBuf;
 				
 				//report all information from device descriptor
-				KdPrint(("%S: USB_DEVICE_DESCRIPTOR...\n",DRV_NAME));
-				KdPrint(("%S: Length of the descriptor data structure= %u (bytes)\n",DRV_NAME,pDescriptor->bLength));
-				KdPrint(("%S: Descriptor type= %x\n",DRV_NAME,pDescriptor->bDescriptorType));
-				KdPrint(("%S: Version of USB specification= %x\n",DRV_NAME,pDescriptor->bcdUSB));
-				KdPrint(("%S: idProduct= %x\n",DRV_NAME,pDescriptor->idProduct));
-				KdPrint(("%S: idVendor= %x\n",DRV_NAME,pDescriptor->idVendor));
-				KdPrint(("%S: bMaxPacketSize0= %x\n",DRV_NAME,pDescriptor->bMaxPacketSize0));
-				KdPrint(("%S: bDeviceSubClass= %x\n",DRV_NAME,pDescriptor->bDeviceSubClass));
-				KdPrint(("%S: bDeviceClass= %x\n",DRV_NAME,pDescriptor->bDeviceClass));
-				KdPrint(("%S: iProduct= %x\n",DRV_NAME,pDescriptor->iProduct));
-				KdPrint(("%S: iSerialNumber= %x\n",DRV_NAME,pDescriptor->iSerialNumber));
-				KdPrint(("%S: bNumConfigurations= %x\n",DRV_NAME,pDescriptor->bNumConfigurations));
+				DEBUG_MSG("%S: USB_DEVICE_DESCRIPTOR...\n",DRV_NAME);
+				DEBUG_MSG("%S: Length of the descriptor data structure= %u (bytes)\n",DRV_NAME,pDescriptor->bLength);
+				DEBUG_MSG("%S: Descriptor type= %x\n",DRV_NAME,pDescriptor->bDescriptorType);
+				DEBUG_MSG("%S: Version of USB specification= %x\n",DRV_NAME,pDescriptor->bcdUSB);
+				DEBUG_MSG("%S: idProduct= %x\n",DRV_NAME,pDescriptor->idProduct);
+				DEBUG_MSG("%S: idVendor= %x\n",DRV_NAME,pDescriptor->idVendor);
+				DEBUG_MSG("%S: bMaxPacketSize0= %x\n",DRV_NAME,pDescriptor->bMaxPacketSize0);
+				DEBUG_MSG("%S: bDeviceSubClass= %x\n",DRV_NAME,pDescriptor->bDeviceSubClass);
+				DEBUG_MSG("%S: bDeviceClass= %x\n",DRV_NAME,pDescriptor->bDeviceClass);
+				DEBUG_MSG("%S: iProduct= %x\n",DRV_NAME,pDescriptor->iProduct);
+				DEBUG_MSG("%S: iSerialNumber= %x\n",DRV_NAME,pDescriptor->iSerialNumber);
+				DEBUG_MSG("%S: bNumConfigurations= %x\n",DRV_NAME,pDescriptor->bNumConfigurations);
 				
 				UCHAR classType = pDescriptor->bDeviceClass;
 
 				switch(classType)
 				{
 				case massStorage:
-					KdPrint(("%S: USB Mass Storage detected! - USB-IF class code = %x\n",DRV_NAME,pDescriptor->bDeviceClass));
+					DEBUG_MSG("%S: USB Mass Storage detected! - USB-IF class code = %x\n",DRV_NAME,pDescriptor->bDeviceClass);
 					status = STATUS_ACCESS_DENIED;
 					break;
 
 				default:
-					KdPrint(("%S: not Mass Storage device - USB-IF class code = %x\n",DRV_NAME,pDescriptor->bDeviceClass));
+					DEBUG_MSG("%S: not Mass Storage device - USB-IF class code = %x\n",DRV_NAME,pDescriptor->bDeviceClass);
 					break;
 				}
 			}
 			else if(mdlBuf)
 			{
-				if(transferBuf) KdPrint(("%S: Unsupported descriptor request since both mdl and tbuffer is initialized.\n",DRV_NAME));
+				if(transferBuf) DEBUG_MSG("%S: Unsupported descriptor request since both mdl and tbuffer is initialized.\n",DRV_NAME);
 				PVOID buf = MmGetSystemAddressForMdl(mdlBuf);
 				if(!buf) 
 				{
-					KdPrint(("%S: Cannot allocate buffer for Mdl!\n",DRV_NAME));
+					DEBUG_MSG("%S: Cannot allocate buffer for Mdl!\n",DRV_NAME);
 					IoFreeMdl(mdlBuf);
 				}
 				pDescriptor = (PUSB_DEVICE_DESCRIPTOR)buf;
 
 				//report all information from device descriptor
-				KdPrint(("%S: USB_DEVICE_DESCRIPTOR...\n",DRV_NAME));
-				KdPrint(("%S: Length of the descriptor data structure= %u (bytes)\n",DRV_NAME,pDescriptor->bLength));
-				KdPrint(("%S: Descriptor type= %x\n",DRV_NAME,pDescriptor->bDescriptorType));
-				KdPrint(("%S: Version of USB specification= %x\n",DRV_NAME,pDescriptor->bcdUSB));
-				KdPrint(("%S: idProduct= %x\n",DRV_NAME,pDescriptor->idProduct));
-				KdPrint(("%S: idVendor= %x\n",DRV_NAME,pDescriptor->idVendor));
-				KdPrint(("%S: bMaxPacketSize0= %x\n",DRV_NAME,pDescriptor->bMaxPacketSize0));
-				KdPrint(("%S: bDeviceSubClass= %x\n",DRV_NAME,pDescriptor->bDeviceSubClass));
-				KdPrint(("%S: bDeviceClass= %x\n",DRV_NAME,pDescriptor->bDeviceClass));
-				KdPrint(("%S: iProduct= %x\n",DRV_NAME,pDescriptor->iProduct));
-				KdPrint(("%S: iSerialNumber= %x\n",DRV_NAME,pDescriptor->iSerialNumber));
-				KdPrint(("%S: bNumConfigurations= %x\n",DRV_NAME,pDescriptor->bNumConfigurations));
+				DEBUG_MSG("%S: USB_DEVICE_DESCRIPTOR...\n",DRV_NAME);
+				DEBUG_MSG("%S: Length of the descriptor data structure= %u (bytes)\n",DRV_NAME,pDescriptor->bLength);
+				DEBUG_MSG("%S: Descriptor type= %x\n",DRV_NAME,pDescriptor->bDescriptorType);
+				DEBUG_MSG("%S: Version of USB specification= %x\n",DRV_NAME,pDescriptor->bcdUSB);
+				DEBUG_MSG("%S: idProduct= %x\n",DRV_NAME,pDescriptor->idProduct);
+				DEBUG_MSG("%S: idVendor= %x\n",DRV_NAME,pDescriptor->idVendor);
+				DEBUG_MSG("%S: bMaxPacketSize0= %x\n",DRV_NAME,pDescriptor->bMaxPacketSize0);
+				DEBUG_MSG("%S: bDeviceSubClass= %x\n",DRV_NAME,pDescriptor->bDeviceSubClass);
+				DEBUG_MSG("%S: bDeviceClass= %x\n",DRV_NAME,pDescriptor->bDeviceClass);
+				DEBUG_MSG("%S: iProduct= %x\n",DRV_NAME,pDescriptor->iProduct);
+				DEBUG_MSG("%S: iSerialNumber= %x\n",DRV_NAME,pDescriptor->iSerialNumber);
+				DEBUG_MSG("%S: bNumConfigurations= %x\n",DRV_NAME,pDescriptor->bNumConfigurations);
 
 				UCHAR classType = pDescriptor->bDeviceClass;
 
 				switch(classType)
 				{
 				case massStorage:
-					KdPrint(("%S: USB Mass Storage detected! - USB-IF class code = %x\n",DRV_NAME,pDescriptor->bDeviceClass));
+					DEBUG_MSG("%S: USB Mass Storage detected! - USB-IF class code = %x\n",DRV_NAME,pDescriptor->bDeviceClass);
 					status = STATUS_ACCESS_DENIED;
 					break;
 
 				default:
-					KdPrint(("%S: not Mass Storage device - USB-IF class code = %x\n",DRV_NAME,pDescriptor->bDeviceClass));
+					DEBUG_MSG("%S: not Mass Storage device - USB-IF class code = %x\n",DRV_NAME,pDescriptor->bDeviceClass);
 					break;
 				}
 			}//endif mdl buffer
-			else {KdPrint(("%S: Cannot retrive any data from descriptor buffer!\n",DRV_NAME));}
+			else {DEBUG_MSG("%S: Cannot retrive any data from descriptor buffer!\n",DRV_NAME);}
 		
 
 
@@ -762,8 +763,8 @@ NTSTATUS inspectReturnedURB(IN PDEVICE_OBJECT fdio, IN PIRP Irp, IN KEVENT Conte
 
 			if(transferBuf)
 			{
-				if(mdlBuf) KdPrint(("%S: Unsupported descriptor request since both mdl and tbuffer is initialized.\n",DRV_NAME));
-				KdPrint(("%S: Configuration Descriptor buffer content is sending to USB hub controller = \n",DRV_NAME));
+				if(mdlBuf) DEBUG_MSG("%S: Unsupported descriptor request since both mdl and tbuffer is initialized.\n",DRV_NAME);
+				DEBUG_MSG("%S: Configuration Descriptor buffer content is sending to USB hub controller = \n",DRV_NAME);
 				//cast transferred buffer to USB_CONFIGURATION_DESCRIPTOR type
 				configDesc = (PUSB_CONFIGURATION_DESCRIPTOR)transferBuf;
 				//interfacedesc = USBD_ParseConfigurationDescriptorEx(configDesc,configDesc,-1,-1,-1,-1,-1);
@@ -781,12 +782,12 @@ NTSTATUS inspectReturnedURB(IN PDEVICE_OBJECT fdio, IN PIRP Irp, IN KEVENT Conte
 						switch(classType)
 						{
 						case massStorage:
-							KdPrint(("%S: USB Mass Storage detected! - USB-IF class code = %x\n",DRV_NAME,pDescriptor->bDeviceClass));
+							DEBUG_MSG("%S: USB Mass Storage detected! - USB-IF class code = %x\n",DRV_NAME,pDescriptor->bDeviceClass);
 							status = STATUS_ACCESS_DENIED;
 							break;
 
 						default:
-							KdPrint(("%S: not Mass Storage device - USB-IF class code = %x\n",DRV_NAME,pDescriptor->bDeviceClass));
+							DEBUG_MSG("%S: not Mass Storage device - USB-IF class code = %x\n",DRV_NAME,pDescriptor->bDeviceClass);
 							break;
 						}
 
@@ -796,13 +797,13 @@ NTSTATUS inspectReturnedURB(IN PDEVICE_OBJECT fdio, IN PIRP Irp, IN KEVENT Conte
 
 			if(mdlBuf)
 			{
-				if(transferBuf) KdPrint(("%S: Unsupported descriptor request since both mdl and tbuffer is initialized.\n",DRV_NAME));
-				KdPrint(("%S: Configuration Descriptor buffer content is sending to USB hub controller = \n",DRV_NAME));
+				if(transferBuf) DEBUG_MSG("%S: Unsupported descriptor request since both mdl and tbuffer is initialized.\n",DRV_NAME);
+				DEBUG_MSG("%S: Configuration Descriptor buffer content is sending to USB hub controller = \n",DRV_NAME);
 				//cast transferred buffer to USB_CONFIGURATION_DESCRIPTOR type
 				PVOID buf = MmGetSystemAddressForMdl(mdlBuf);
 				if(!buf) 
 				{
-					KdPrint(("%S: Cannot allocate buffer for Mdl!\n",DRV_NAME));
+					DEBUG_MSG("%S: Cannot allocate buffer for Mdl!\n",DRV_NAME);
 					IoFreeMdl(mdlBuf);
 				}
 
@@ -822,12 +823,12 @@ NTSTATUS inspectReturnedURB(IN PDEVICE_OBJECT fdio, IN PIRP Irp, IN KEVENT Conte
 						switch(classType)
 						{
 						case massStorage:
-							KdPrint(("%S: USB Mass Storage detected! - USB-IF class code = %x\n",DRV_NAME,interfacedesc->bInterfaceClass));
+							DEBUG_MSG("%S: USB Mass Storage detected! - USB-IF class code = %x\n",DRV_NAME,interfacedesc->bInterfaceClass);
 							status = STATUS_ACCESS_DENIED;
 							break;
 
 						default:
-							KdPrint(("%S: not Mass Storage device - USB-IF class code = %x\n",DRV_NAME,interfacedesc->bInterfaceClass));
+							DEBUG_MSG("%S: not Mass Storage device - USB-IF class code = %x\n",DRV_NAME,interfacedesc->bInterfaceClass);
 							break;
 						}
 
@@ -844,8 +845,8 @@ NTSTATUS inspectReturnedURB(IN PDEVICE_OBJECT fdio, IN PIRP Irp, IN KEVENT Conte
 
 			if(transferBuf)
 			{
-				if(mdlBuf) KdPrint(("%S: Unsupported descriptor request since both mdl and tbuffer is initialized.\n",DRV_NAME));
-				KdPrint(("%S: String Descriptor buffer content is sending to USB hub controller = \n",DRV_NAME));
+				if(mdlBuf) DEBUG_MSG("%S: Unsupported descriptor request since both mdl and tbuffer is initialized.\n",DRV_NAME);
+				DEBUG_MSG("%S: String Descriptor buffer content is sending to USB hub controller = \n",DRV_NAME);
 				//cast transferred buffer to USB_DEVICE_DESCRIPTOR type
 				strDesc = (PUSB_STRING_DESCRIPTOR)transferBuf;
 				ULONG size = (strDesc->bLength-2)/2;
@@ -860,9 +861,9 @@ NTSTATUS inspectReturnedURB(IN PDEVICE_OBJECT fdio, IN PIRP Irp, IN KEVENT Conte
 				//stringDesc->Buffer = str;
 
 				//report all information from device descriptor
-				KdPrint(("%S: USB_STRING_DESCRIPTOR...\n",DRV_NAME));
-				KdPrint(("%S: Length of the string descriptor structure= %u (bytes)\n",DRV_NAME,size));
-				KdPrint(("%S: String descriptor = %s\n",DRV_NAME,&str));
+				DEBUG_MSG("%S: USB_STRING_DESCRIPTOR...\n",DRV_NAME);
+				DEBUG_MSG("%S: Length of the string descriptor structure= %u (bytes)\n",DRV_NAME,size);
+				DEBUG_MSG("%S: String descriptor = %s\n",DRV_NAME,&str);
 
 				break;
 
@@ -870,13 +871,13 @@ NTSTATUS inspectReturnedURB(IN PDEVICE_OBJECT fdio, IN PIRP Irp, IN KEVENT Conte
 
 			if(mdlBuf)
 			{
-				if(transferBuf) KdPrint(("%S: Unsupported descriptor request since both mdl and tbuffer is initialized.\n",DRV_NAME));
-				KdPrint(("%S: String Descriptor buffer content is sending to USB hub controller = \n",DRV_NAME));
+				if(transferBuf) DEBUG_MSG("%S: Unsupported descriptor request since both mdl and tbuffer is initialized.\n",DRV_NAME);
+				DEBUG_MSG("%S: String Descriptor buffer content is sending to USB hub controller = \n",DRV_NAME);
 				//cast transferred buffer to USB_CONFIGURATION_DESCRIPTOR type
 				PVOID buf = MmGetSystemAddressForMdl(mdlBuf);
 				if(!buf) 
 				{
-					KdPrint(("%S: Cannot allocate buffer for Mdl!\n",DRV_NAME));
+					DEBUG_MSG("%S: Cannot allocate buffer for Mdl!\n",DRV_NAME);
 					IoFreeMdl(mdlBuf);
 				}
 
@@ -894,9 +895,9 @@ NTSTATUS inspectReturnedURB(IN PDEVICE_OBJECT fdio, IN PIRP Irp, IN KEVENT Conte
 					//stringDesc->Buffer = str;
 
 					//report all information from device descriptor
-					KdPrint(("%S: USB_STRING_DESCRIPTOR...\n", DRV_NAME));
-					KdPrint(("%S: Length of the string descriptor structure= %u (bytes)\n", DRV_NAME, size));
-					KdPrint(("%S: String descriptor = %s\n", DRV_NAME, &str));
+					DEBUG_MSG("%S: USB_STRING_DESCRIPTOR...\n", DRV_NAME);
+					DEBUG_MSG("%S: Length of the string descriptor structure= %u (bytes)\n", DRV_NAME, size);
+					DEBUG_MSG("%S: String descriptor = %s\n", DRV_NAME, &str);
 				} else status = STATUS_INSUFFICIENT_RESOURCES;
 				
 				break;
