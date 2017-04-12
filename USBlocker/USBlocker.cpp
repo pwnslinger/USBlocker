@@ -228,9 +228,7 @@ NTSTATUS USBlockerQueryDeviceCompatibleID(IN PDEVICE_OBJECT DeviceObject, OUT LP
 	IO_STATUS_BLOCK ioStatusBlock;
 	PIRP irp;
 	PDEVICE_OBJECT highestDO;
-
-
-	DEBUG_ENTER_FUNCTION("entering USBlockerQueryDeviceCompatibleID ; DriverObject=0x%p ;", DeviceObject);
+	DEBUG_ENTER_FUNCTION("DeviceObject=0x%p; pCID=0x%p", DeviceObject, pCID);
 
 	KeInitializeEvent(&event, NotificationEvent, FALSE);
 
@@ -270,7 +268,7 @@ NTSTATUS USBlockerQueryDeviceCompatibleID(IN PDEVICE_OBJECT DeviceObject, OUT LP
 	}
 	
 	ObDereferenceObject(highestDO);
-	DEBUG_EXIT_FUNCTION("0x%x", status);
+	DEBUG_EXIT_FUNCTION("0x%x, Information=0x%p", status, ioStatusBlock.Information);
 	return status;
 
 }
@@ -360,6 +358,13 @@ NTSTATUS USBlockerAddDevice(IN PDRIVER_OBJECT  DriverObject, IN PDEVICE_OBJECT  
 	pdx->PhysicalDeviceObject = PhysicalDeviceObject;
 	
 	IoInitializeRemoveLock(&pdx->RemoveLock,0,0,0);
+	status = IoAttachDeviceToDeviceStackSafe(fido, PhysicalDeviceObject, &pdx->lowerDeviceObject);
+	if (!NT_SUCCESS(status)) {
+		IoDeleteDevice(fido);
+
+		DEBUG_EXIT_FUNCTION("0x%x", status);
+		return status;
+	}
 	
 	status = IoRegisterDeviceInterface(PhysicalDeviceObject, &GUID_USBlockerInterface, NULL, &pdx->DeviceInterface);
 	if (!NT_SUCCESS(status)) {
