@@ -372,7 +372,7 @@ NTSTATUS USBlockerAddDevice(IN PDRIVER_OBJECT  DriverObject, IN PDEVICE_OBJECT  
 		return status;
 	}
 
-	DEBUG_MSG("%S: Symbolic Link Name is %T.\n", DRV_NAME, &pdx->DeviceInterface);
+	DEBUG_MSG("Symbolic Link Name is %wZ", &pdx->DeviceInterface);
 	highestDO = pdx->lowerDeviceObject;
 	fido->Flags |= highestDO->Flags & (DO_DIRECT_IO | DO_POWER_PAGABLE | DO_POWER_INRUSH | DO_BUFFERED_IO);
 	fido->DeviceType = highestDO->DeviceType;
