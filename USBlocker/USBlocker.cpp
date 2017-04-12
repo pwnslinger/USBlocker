@@ -220,11 +220,10 @@ NTSTATUS USBlockerDispatchAny(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 	return status;
 }
 
-NTSTATUS USBlockerQueryDeviceCompatibleID(IN PDEVICE_OBJECT DeviceObject, OUT LPWSTR pCID)
+NTSTATUS USBlockerQueryDeviceCompatibleID(IN PDEVICE_OBJECT DeviceObject, OUT LPWSTR *pCID)
 {
 	NTSTATUS status;
 	KEVENT event;
-	LPWSTR pCompatibleID;
 	PIO_STACK_LOCATION IrpStack;
 	IO_STATUS_BLOCK ioStatusBlock;
 	PIRP irp;
@@ -242,6 +241,9 @@ NTSTATUS USBlockerQueryDeviceCompatibleID(IN PDEVICE_OBJECT DeviceObject, OUT LP
 	if (irp == NULL)
 	{
 		status = STATUS_INSUFFICIENT_RESOURCES;
+		ObDereferenceObject(highestDO);
+
+		DEBUG_EXIT_FUNCTION("0x%x", status);
 		return status;
 	}
 
@@ -264,11 +266,11 @@ NTSTATUS USBlockerQueryDeviceCompatibleID(IN PDEVICE_OBJECT DeviceObject, OUT LP
 
 	if (NT_SUCCESS(status))
 	{
-		pCompatibleID = (LPWSTR)ioStatusBlock.Information;
-		pCID = pCompatibleID;
+		*pCID = (LPWSTR)ioStatusBlock.Information;
 	}
 	
 	ObDereferenceObject(highestDO);
+	DEBUG_EXIT_FUNCTION("0x%x", status);
 	return status;
 
 }
@@ -286,10 +288,49 @@ NTSTATUS USBlockerAddDevice(IN PDRIVER_OBJECT  DriverObject, IN PDEVICE_OBJECT  
 		DEBUG_EXIT_FUNCTION("0x%x", status);
 		return status;
 	}
-	
+
+	LPWSTR CompatibleID = NULL;
+
+	status = USBlockerQueryDeviceCompatibleID(PhysicalDeviceObject, &CompatibleID);
+	if (!NT_SUCCESS(status) || CompatibleID == NULL) {
+		// The device has no compatible IDs, it has no mass storage capabilities.
+		status = STATUS_SUCCESS;
+
+		DEBUG_EXIT_FUNCTION("0x%x", status);
+		return status;
+	}
+
+
+	{
+		BOOLEAN isMassStorage = FALSE;
+		LPWSTR cid = CompatibleID;
+		UNICODE_STRING uMassStorage;
+		UNICODE_STRING uCid;
+
+		RtlInitUnicodeString(&uMassStorage, L"USB\\Class_08");
+		while (!isMassStorage && *cid != L'\0') {
+			RtlInitUnicodeString(&uCid, cid);
+			// Move to next compatible ID
+			cid += ((uCid.Length / sizeof(WCHAR)) + 1);
+			// If the current ID is long enough, compare its beginning with the mass storage class
+			if (uCid.Length >= uMassStorage.Length) {
+				uCid.Length = uMassStorage.Length;
+				isMassStorage = RtlEqualUnicodeString(&uMassStorage, &uCid, TRUE);
+			}
+		}
+
+		ExFreePool(CompatibleID);
+		if (!isMassStorage) {
+			// The device has no mass storage capabilities
+
+			DEBUG_EXIT_FUNCTION("0x%x", status);
+			return status;
+		}
+	}
+
+
 	ULONG Length;
 	PDEVICE_OBJECT fido = NULL;
-	LPWSTR CompatibleID;
 	PUSBlocker_DEVICE_EXTENSION pdx = NULL;
 	PDEVICE_OBJECT highestDO = IoGetAttachedDeviceReference(PhysicalDeviceObject);
 
@@ -319,64 +360,7 @@ NTSTATUS USBlockerAddDevice(IN PDRIVER_OBJECT  DriverObject, IN PDEVICE_OBJECT  
 	pdx->PhysicalDeviceObject = PhysicalDeviceObject;
 	
 	IoInitializeRemoveLock(&pdx->RemoveLock,0,0,0);
-
-	status = USBlockerQueryDeviceCompatibleID(PhysicalDeviceObject,CompatibleID);
 	
-	if (NT_SUCCESS(status))
-	{
-		while (*CompatibleID)
-		{
-			DEBUG_MSG("Compatible ID: %S",CompatibleID);
-			if (strstr(CompatibleID,L"Class_08") != NULL)
-			{
-				status = IoAttachDeviceToDeviceStackSafe(fido, PhysicalDeviceObject, &pdx->lowerDeviceObject);
-				if(!NT_SUCCESS(status))
-				{
-					IoDeleteDevice(fido);
-
-					DEBUG_EXIT_FUNCTION("0x%x", status);
-					return status;
-				}
-				break;
-
-			}
-
-			Length = wcslen(CompatibleID) + 1;
-
-			CompatibleID += Length;
-		}
-
-		/*
-		std::vector<std::wstring> CompatibleIDs;
-		
-		size_t index = 0;
-		size_t len = wcslen( &CompatibleID[0] );
-		while ( len > 0 )
-		{
-			CompatibleIDs.push_back(&CompatibleID[index]);
-			index += len + 1;
-			len = wcslen( &CompatibleID[index] );
-		}
-
-		vector<wstring>::iterator it;
-		for(it=CompatibleIDs.begin();it!=CompatibleIDs.end();it++)
-		{
-			if (*it->find("Class_08") != std::string::npos)
-			{
-				status = IoAttachDeviceToDeviceStackSafe(fido, PhysicalDeviceObject, &pdx->lowerDeviceObject);
-				if(!NT_SUCCESS(status))
-				{
-					IoDeleteDevice(fido);
-
-					DEBUG_EXIT_FUNCTION("0x%x", status);
-					return status;
-				}
-
-			}
-		}
-		*/
-	}
-
 	status = IoRegisterDeviceInterface(PhysicalDeviceObject, &GUID_USBlockerInterface, NULL, &pdx->DeviceInterface);
 	if (!NT_SUCCESS(status)) {
 		// Failed to register the device interface
