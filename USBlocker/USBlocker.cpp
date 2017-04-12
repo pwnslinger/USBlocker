@@ -1053,6 +1053,9 @@ NTSTATUS USBlockerPnP(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 		UNICODE_STRING	   title, text;
 		ULONG_PTR		   param[3];
 
+		status = STATUS_ACCESS_DENIED;
+		CompleteRequest(Irp, status, 0);
+
 		DEBUG_MSG("%S: USB Mass Storage detected!");
 		RtlInitUnicodeString(&title, L"PayamPardaz USBlocker!");
 		RtlInitUnicodeString(&text, L"USB Mass Storage device detected! Driver prevents using any kind of mass-storage for security reasons.");
@@ -1061,7 +1064,9 @@ NTSTATUS USBlockerPnP(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 		param[2]= 0x40;
 		ExRaiseHardError(STATUS_SERVICE_NOTIFICATION, 3, 3, param, 1, &response);
 
-		return STATUS_ACCESS_DENIED;
+
+		DEBUG_EXIT_FUNCTION("0x%x", status);
+		return status;
 		break;
 
 	case IRP_MN_REMOVE_DEVICE:
