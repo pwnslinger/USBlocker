@@ -1,6 +1,7 @@
 
 #include "stdafx.h"
 #include <usb.h>
+#include <string.h>
 #include <usbioctl.h>
 #include "USBlocker.h"
 
@@ -36,6 +37,7 @@ NTSTATUS USBlockerIOCTL(PDEVICE_OBJECT DeviceObject, PIRP Irp);
 NTSTATUS USBlockerInternalIOCTL(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
 //NTSTATUS wmiControl(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
 //NTSTATUS dispatchIOCTL(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
+NTSTATUS USBlockerQueryDeviceCompatibleID(IN PDEVICE_OBJECT DeviceObject, OUT PUNICODE_STRING pCID);
 NTSTATUS dispatchPower(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
 NTSTATUS getDeviceDescriptor(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
 NTSTATUS USBCall(IN PDEVICE_OBJECT DeviceObject, IN PURB urb, IN PIRP Irp);
@@ -218,6 +220,58 @@ NTSTATUS USBlockerDispatchAny(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 	return status;
 }
 
+NTSTATUS USBlockerQueryDeviceCompatibleID(IN PDEVICE_OBJECT DeviceObject, OUT LPWSTR pCID)
+{
+	NTSTATUS status;
+	KEVENT event;
+	LPWSTR pCompatibleID;
+	PIO_STACK_LOCATION IrpStack;
+	IO_STATUS_BLOCK ioStatusBlock;
+	PIRP irp;
+	PDEVICE_OBJECT highestDO;
+
+
+	DEBUG_ENTER_FUNCTION("entering USBlockerQueryDeviceCompatibleID ; DriverObject=0x%p ;", DeviceObject);
+
+	KeInitializeEvent(&event, NotificationEvent, FALSE);
+
+	highestDO = IoGetAttachedDeviceReference(DeviceObject);
+
+	irp = IoBuildSynchronousFsdRequest(IRP_MJ_PNP,highestDO, NULL, 0, NULL, &event, &ioStatusBlock);
+
+	if (irp == NULL)
+	{
+		status = STATUS_INSUFFICIENT_RESOURCES;
+		return status;
+	}
+
+	RtlZeroMemory(&IrpStack, sizeof(IrpStack));
+
+	IrpStack = IoGetNextIrpStackLocation(irp);
+	IrpStack->MinorFunction = IRP_MN_QUERY_ID;
+	IrpStack->Parameters.QueryId.IdType = BusQueryCompatibleIDs;
+
+	irp->IoStatus.Status = STATUS_NOT_SUPPORTED;
+
+	status = IoCallDriver(highestDO,irp);
+
+	if (status == STATUS_PENDING)
+	{
+
+		KeWaitForSingleObject(&event, Executive, KernelMode,FALSE,NULL);
+		status = ioStatusBlock.Status;
+	}
+
+	if (NT_SUCCESS(status))
+	{
+		pCompatibleID = (LPWSTR)ioStatusBlock.Information;
+		pCID = pCompatibleID;
+	}
+	
+	ObDereferenceObject(highestDO);
+	return status;
+
+}
 
 NTSTATUS USBlockerAddDevice(IN PDRIVER_OBJECT  DriverObject, IN PDEVICE_OBJECT  PhysicalDeviceObject)
 {
@@ -232,8 +286,10 @@ NTSTATUS USBlockerAddDevice(IN PDRIVER_OBJECT  DriverObject, IN PDEVICE_OBJECT  
 		DEBUG_EXIT_FUNCTION("0x%x", status);
 		return status;
 	}
-
+	
+	ULONG Length;
 	PDEVICE_OBJECT fido = NULL;
+	LPWSTR CompatibleID;
 	PUSBlocker_DEVICE_EXTENSION pdx = NULL;
 	PDEVICE_OBJECT highestDO = IoGetAttachedDeviceReference(PhysicalDeviceObject);
 
@@ -257,21 +313,70 @@ NTSTATUS USBlockerAddDevice(IN PDRIVER_OBJECT  DriverObject, IN PDEVICE_OBJECT  
 	pdx = (PUSBlocker_DEVICE_EXTENSION)fido->DeviceExtension;
 	RtlZeroMemory(pdx,sizeof(PUSBlocker_DEVICE_EXTENSION));
 		
-	DbgPrint("%S: Symbolic Link Name is %T.\n",DRV_NAME,&pdx->DeviceInterface);
+	DEBUG_MSG("%S: Symbolic Link Name is %T.\n",DRV_NAME,&pdx->DeviceInterface);
 
 	pdx->DeviceObject = fido;
 	pdx->PhysicalDeviceObject = PhysicalDeviceObject;
-
+	
 	IoInitializeRemoveLock(&pdx->RemoveLock,0,0,0);
-	status = IoAttachDeviceToDeviceStackSafe(fido, PhysicalDeviceObject, &pdx->lowerDeviceObject);
-	if(!NT_SUCCESS(status))
-	{
-		IoDeleteDevice(fido);
 
-		DEBUG_EXIT_FUNCTION("0x%x", status);
-		return status;
-	}
+	status = USBlockerQueryDeviceCompatibleID(PhysicalDeviceObject,CompatibleID);
+	
+	if (NT_SUCCESS(status))
+	{
+		while (*CompatibleID)
+		{
+			DEBUG_MSG("Compatible ID: %S",CompatibleID);
+			if (strstr(CompatibleID,L"Class_08") != NULL)
+			{
+				status = IoAttachDeviceToDeviceStackSafe(fido, PhysicalDeviceObject, &pdx->lowerDeviceObject);
+				if(!NT_SUCCESS(status))
+				{
+					IoDeleteDevice(fido);
+
+					DEBUG_EXIT_FUNCTION("0x%x", status);
+					return status;
+				}
+				break;
+
+			}
+
+			Length = wcslen(CompatibleID) + 1;
+
+			CompatibleID += Length;
+		}
+
+		/*
+		std::vector<std::wstring> CompatibleIDs;
 		
+		size_t index = 0;
+		size_t len = wcslen( &CompatibleID[0] );
+		while ( len > 0 )
+		{
+			CompatibleIDs.push_back(&CompatibleID[index]);
+			index += len + 1;
+			len = wcslen( &CompatibleID[index] );
+		}
+
+		vector<wstring>::iterator it;
+		for(it=CompatibleIDs.begin();it!=CompatibleIDs.end();it++)
+		{
+			if (*it->find("Class_08") != std::string::npos)
+			{
+				status = IoAttachDeviceToDeviceStackSafe(fido, PhysicalDeviceObject, &pdx->lowerDeviceObject);
+				if(!NT_SUCCESS(status))
+				{
+					IoDeleteDevice(fido);
+
+					DEBUG_EXIT_FUNCTION("0x%x", status);
+					return status;
+				}
+
+			}
+		}
+		*/
+	}
+
 	status = IoRegisterDeviceInterface(PhysicalDeviceObject, &GUID_USBlockerInterface, NULL, &pdx->DeviceInterface);
 	if (!NT_SUCCESS(status)) {
 		// Failed to register the device interface
@@ -587,11 +692,25 @@ NTSTATUS USBlockerInternalIOCTL(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 	case IOCTL_INTERNAL_USB_SUBMIT_IDLE_NOTIFICATION: req = L"IOCTL_INTERNAL_USB_SUBMIT_IDLE_NOTIFICATION"; break;
 	default: req=NULL; break; //default switch case 
 	}
-	DEBUG_MSG("%s", req);
+	DEBUG_MSG("iocode_request=%s", req);
 	if (req==L"IOCTL_INTERNAL_USB_SUBMIT_URB")
 	{
-		DEBUG_MSG("0x%x", status);
+		DEBUG_MSG("iocode_request=%s", req);
 		urb = (PURB)stack->Parameters.Others.Argument1;
+
+		//Just for DEBUG purposes
+		USHORT func = urb->UrbHeader.Function;
+		switch(func)
+		{
+		case URB_FUNCTION_SELECT_CONFIGURATION: DEBUG_MSG("URB Function type is: URB_FUNCTION_SELECT_CONFIGURATION");
+		case URB_FUNCTION_SELECT_INTERFACE: DEBUG_MSG("URB Function type is: URB_FUNCTION_SELECT_INTERFACE");
+		case URB_FUNCTION_ABORT_PIPE: DEBUG_MSG("URB Function type is: URB_FUNCTION_ABORT_PIPE");
+		case URB_FUNCTION_TAKE_FRAME_LENGTH_CONTROL: DEBUG_MSG("URB Function type is: URB_FUNCTION_TAKE_FRAME_LENGTH_CONTROL");
+		case URB_FUNCTION_RELEASE_FRAME_LENGTH_CONTROL: DEBUG_MSG("URB Function type is: URB_FUNCTION_RELEASE_FRAME_LENGTH_CONTROL");
+		case URB_FUNCTION_GET_FRAME_LENGTH: DEBUG_MSG("URB Function type is: URB_FUNCTION_GET_FRAME_LENGTH");
+		default: DEBUG_MSG("URB Function type is: Unknown");
+		}
+
 		if(( urb->UrbControlDescriptorRequest.DescriptorType==USB_STRING_DESCRIPTOR_TYPE || urb->UrbControlDescriptorRequest.DescriptorType==USB_CONFIGURATION_DESCRIPTOR_TYPE || urb->UrbControlDescriptorRequest.DescriptorType==USB_DEVICE_DESCRIPTOR_TYPE) && (urb->UrbHeader.Function==URB_FUNCTION_GET_DESCRIPTOR_FROM_DEVICE || urb->UrbHeader.Function==URB_FUNCTION_GET_DESCRIPTOR_FROM_ENDPOINT))
 		{
 			_URB_CONTROL_DESCRIPTOR_REQUEST *pControlDescriptorRequest = (struct _URB_CONTROL_DESCRIPTOR_REQUEST *) urb;
@@ -935,6 +1054,7 @@ NTSTATUS USBlockerPnP(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 	switch (irpSp->MinorFunction)
 	{
 	case IRP_MN_START_DEVICE:
+		/*
 		status = USBlockerForwardIrpSynchronous(DeviceObject, Irp);
 		if (NT_SUCCESS(status))
 			status = IoSetDeviceInterfaceState(&pdx->DeviceInterface, TRUE);
@@ -942,6 +1062,20 @@ NTSTATUS USBlockerPnP(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 		Irp->IoStatus.Status = status;
 		IoCompleteRequest(Irp,IO_NO_INCREMENT); //should be called from dispatcher routine not from completion routine
 		IoReleaseRemoveLock(&pdx->RemoveLock,Irp);
+		*/
+		ULONG			   response;
+		UNICODE_STRING	   title, text;
+		ULONG_PTR		   param[3];
+
+		DEBUG_MSG("%S: USB Mass Storage detected!");
+		RtlInitUnicodeString(&title, L"PayamPardaz USBlocker!");
+		RtlInitUnicodeString(&text, L"USB Mass Storage device detected! Driver prevents using any kind of mass-storage for security reasons.");
+		param[0]= (ULONG_PTR) &text;
+		param[1]= (ULONG_PTR) &title;
+		param[2]= 0x40;
+		ExRaiseHardError(STATUS_SERVICE_NOTIFICATION, 3, 3, param, 1, &response);
+
+		return STATUS_ACCESS_DENIED;
 		break;
 
 	case IRP_MN_REMOVE_DEVICE:
@@ -972,23 +1106,23 @@ void dumpBuffer(IN ULONG bufSize,IN PVOID pBuffer, IN PMDL pMdl)
 
 	if(transferBuf)
 	{
-		if(mdlBuf) KdPrint(("%S: Unsupported descriptor request since both mdl and tbuffer is initialized.\n",DRV_NAME));
-		KdPrint(("%S: Descriptor buffer content is sending to USB hub controller = \n",DRV_NAME));
+		if(mdlBuf) DEBUG_MSG("%S: Unsupported descriptor request since both mdl and tbuffer is initialized.\n",DRV_NAME);
+		DEBUG_MSG("%S: Descriptor buffer content is sending to USB hub controller = \n",DRV_NAME);
 		PUCHAR buf = (PUCHAR)transferBuf;
 		for(int i=0;i<sizeof(buf);i++) KdPrint(("%S: %02X",DRV_NAME,buf[i]));
-		KdPrint(("\n"));
+		DEBUG_MSG("\n");
 	}
 	else if(mdlBuf)
 	{
-		if(transferBuf) KdPrint(("%S: Unsupported descriptor request since both mdl and tbuffer is initialized.\n",DRV_NAME));
+		if(transferBuf) DEBUG_MSG("%S: Unsupported descriptor request since both mdl and tbuffer is initialized.\n",DRV_NAME);
 		PUCHAR buf = (PUCHAR)MmGetSystemAddressForMdl(mdlBuf);
 		if(!buf) 
 		{
-			KdPrint(("%S: Cannot allocate buffer for Mdl!\n",DRV_NAME));
+			DEBUG_MSG("%S: Cannot allocate buffer for Mdl!\n",DRV_NAME);
 			IoFreeMdl(mdlBuf);
 		}
 		for(int i=0;i<sizeof(buf);i++) KdPrint(("%S: %02X",DRV_NAME,buf[i]));
-		KdPrint(("\n"));
+		DEBUG_MSG("\n");
 	}
-	else {KdPrint(("%S: Cannot reterive any data from descriptor buffer!\n",DRV_NAME));}
+	else {DEBUG_MSG("%S: Cannot reterive any data from descriptor buffer!\n",DRV_NAME);}
 }
