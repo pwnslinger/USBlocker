@@ -350,13 +350,9 @@ NTSTATUS USBlockerAddDevice(IN PDRIVER_OBJECT  DriverObject, IN PDEVICE_OBJECT  
 	}
 
 	pdx = (PUSBlocker_DEVICE_EXTENSION)fido->DeviceExtension;
-	RtlZeroMemory(pdx,sizeof(PUSBlocker_DEVICE_EXTENSION));
-		
-	DEBUG_MSG("%S: Symbolic Link Name is %T.\n",DRV_NAME,&pdx->DeviceInterface);
-
+	RtlSecureZeroMemory(pdx,sizeof(USBlocker_DEVICE_EXTENSION));
 	pdx->DeviceObject = fido;
 	pdx->PhysicalDeviceObject = PhysicalDeviceObject;
-	
 	IoInitializeRemoveLock(&pdx->RemoveLock,0,0,0);
 	status = IoAttachDeviceToDeviceStackSafe(fido, PhysicalDeviceObject, &pdx->lowerDeviceObject);
 	if (!NT_SUCCESS(status)) {
@@ -376,6 +372,7 @@ NTSTATUS USBlockerAddDevice(IN PDRIVER_OBJECT  DriverObject, IN PDEVICE_OBJECT  
 		return status;
 	}
 
+	DEBUG_MSG("%S: Symbolic Link Name is %T.\n", DRV_NAME, &pdx->DeviceInterface);
 	highestDO = pdx->lowerDeviceObject;
 	fido->Flags |= highestDO->Flags & (DO_DIRECT_IO | DO_POWER_PAGABLE | DO_POWER_INRUSH | DO_BUFFERED_IO);
 	fido->DeviceType = highestDO->DeviceType;
