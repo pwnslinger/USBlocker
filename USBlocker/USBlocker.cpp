@@ -124,7 +124,7 @@ VOID USBlockerUnload(IN PDRIVER_OBJECT DriverObject)
 		srvkey.Buffer = NULL;
 	}
 
-	IoDeleteDevice(DriverObject->DeviceObject);
+	//IoDeleteDevice(DriverObject->DeviceObject);
 
 	DEBUG_EXIT_FUNCTION_VOID();
 	return;
